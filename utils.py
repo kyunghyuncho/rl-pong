@@ -57,7 +57,7 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
             if verbose:
                 print(out_probs, action)
         else:
-            act_dist = Categorical(out_probs)
+            act_dist = Categorical(out_probs.clamp(min=1e-8))
             action = act_dist.sample().item()
         action_prob = out_probs[action].item()
 

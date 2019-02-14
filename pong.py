@@ -5,6 +5,8 @@ from torch.optim import Adam, SGD
 
 import numpy
 
+import argparse
+
 from matplotlib import pyplot as plot
 
 import copy
@@ -57,19 +59,19 @@ class Value(nn.Module):
     def forward(self, obs):
         return self.layers(obs)
 
-def main():
+def main(args):
 
-    env = gym.make('Pong-ram-v0')
+    env = gym.make(args.env)
     # env = gym.make('Assault-ram-v0')
 
-    n_frames = 1
+    n_frames = args.n_frames
 
     # create a policy
-    player = Player(n_in=128 * n_frames, n_hid=32, n_out=6).to(device)
+    player = Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
 
     # create a value estimator
-    value = Value(n_in=128 * n_frames, n_hid=32).to(device)
-    value_old = Value(n_in=128 * n_frames, n_hid=32).to(device)
+    value = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+    value_old = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
     copy_params(value, value_old)
 
     # initialize optimizers
@@ -77,21 +79,23 @@ def main():
     opt_value = Adam(value.parameters(), lr=0.0001)
 
     # initialize replay buffer
-    replay_buffer = Buffer(max_items=50000, n_frames=n_frames)
+    replay_buffer = Buffer(max_items=args.buffer_size, n_frames=n_frames)
 
-    n_iter = 1000
+    n_iter = args.n_iter
     init_collect = 1
-    n_collect = 1
-    n_value = 150
-    n_policy = 150
-    disp_iter = 1
-    val_iter = 1
+    n_collect = args.n_collect
+    n_value = args.n_value
+    n_policy = args.n_policy
 
-    max_len = 1000
-    batch_size = 1000
+    disp_iter = args.disp_iter
+    val_iter = args.val_iter
+    save_iter = args.save_iter
 
-    ent_coeff = 0. #0.001
-    discount_factor = .95
+    max_len = args.max_len
+    batch_size = args.batch_size
+
+    ent_coeff = args.ent_coeff
+    discount_factor = args.discount_factor
 
     value_loss = -numpy.Inf
     ret = -numpy.Inf
@@ -101,6 +105,19 @@ def main():
     return_history = []
 
     for ni in range(n_iter):
+        if numpy.mod(ni, save_iter) == 0:
+            torch.save({
+                'n_iter': n_iter,
+                'n_collect': n_collect,
+                'n_value': n_value,
+                'n_policy': n_policy,
+                'max_len': max_len,
+                'batch_size': batch_size,
+                'player': player.state_dict(),
+                'value': value.state_dict(),
+                'return_history': return_history, 
+                }, '{}_{}.th'.format(args.saveto,ni+1))
+
         player.eval()
 
         if numpy.mod(ni, val_iter) == 0:
@@ -215,28 +232,27 @@ def main():
             loss.backward()
             opt_player.step()
 
-    plot.figure()
-
-    plot.plot(return_history)
-    plot.grid(True)
-    plot.xlabel('# of plays x {}'.format(n_collect))
-    plot.ylabel('Return over the episode of length {}'.format(max_len))
-
-    plot.show()
-    plot.savefig('return_log.pdf', dpi=150)
-
-    torch.save({
-        'n_iter': n_iter,
-        'n_collect': n_collect,
-        'n_value': n_value,
-        'n_policy': n_policy,
-        'max_len': max_len,
-        'batch_size': batch_size,
-        'player': player.state_dict(),
-        'value': value.state_dict(),
-        'return_history': return_history, 
-        }, 'saved_model.th')
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-n-iter', type=int, default=1000)
+    parser.add_argument('-n-collect', type=int, default=1)
+    parser.add_argument('-n-value', type=int, default=150)
+    parser.add_argument('-n-policy', type=int, default=150)
+    parser.add_argument('-disp-iter', type=int, default=1)
+    parser.add_argument('-val-iter', type=int, default=1)
+    parser.add_argument('-save-iter', type=int, default=10)
+    parser.add_argument('-max-len', type=int, default=1000)
+    parser.add_argument('-batch-size', type=int, default=1000)
+    parser.add_argument('-ent-coeff', type=float, default=0.)
+    parser.add_argument('-discount-factor', type=float, default=0.95)
+    parser.add_argument('-n-hid', type=int, default=256)
+    parser.add_argument('-buffer-size', type=int, default=50000)
+    parser.add_argument('-n-frames', type=int, default=1)
+    parser.add_argument('-env', type=str, default='Pong-ram-v0')
+    parser.add_argument('saveto', type=str)
+
+    args = parser.parse_args()
+
+    main(args)
