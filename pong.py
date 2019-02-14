@@ -6,8 +6,10 @@ from torch.optim import Adam, SGD
 import numpy
 
 import argparse
+import glob
 
-from matplotlib import pyplot as plot
+
+#from matplotlib import pyplot as plot
 
 import copy
 from time import sleep
@@ -66,18 +68,6 @@ def main(args):
 
     n_frames = args.n_frames
 
-    # create a policy
-    player = Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
-
-    # create a value estimator
-    value = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
-    value_old = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
-    copy_params(value, value_old)
-
-    # initialize optimizers
-    opt_player = Adam(player.parameters(), lr=0.0001)
-    opt_value = Adam(value.parameters(), lr=0.0001)
-
     # initialize replay buffer
     replay_buffer = Buffer(max_items=args.buffer_size, n_frames=n_frames)
 
@@ -102,7 +92,33 @@ def main(args):
     entropy = -numpy.Inf
     valid_ret = -numpy.Inf
 
+    offset = 0
+
     return_history = []
+
+    # create a policy
+    player = Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
+
+    # create a value estimator
+    value = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+    value_old = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+
+    if args.cont:
+        files = glob.glob("{}*th".format(args.saveto))
+        iterations = [int(".".join(f.split('.')[:-1]).split('_')[-1].strip()) for f in files]
+        last_iter = numpy.max(iterations)
+        offset = last_iter-1
+        print('Reloading from {}_{}.th'.format(args.saveto, last_iter))
+        checkpoint = torch.load("{}_{}.th".format(args.saveto, last_iter))
+        player.load_state_dict(checkpoint['player'])
+        value.load_state_dict(checkpoint['value'])
+        return_history = checkpoint['return_history']
+
+    copy_params(value, value_old)
+
+    # initialize optimizers
+    opt_player = Adam(player.parameters(), lr=0.0001)
+    opt_value = Adam(value.parameters(), lr=0.0001)
 
     for ni in range(n_iter):
         if numpy.mod(ni, save_iter) == 0:
@@ -116,7 +132,7 @@ def main(args):
                 'player': player.state_dict(),
                 'value': value.state_dict(),
                 'return_history': return_history, 
-                }, '{}_{}.th'.format(args.saveto,ni+1))
+                }, '{}_{}.th'.format(args.saveto,ni+offset+1))
 
         player.eval()
 
@@ -161,11 +177,11 @@ def main(args):
             batch_a = torch.from_numpy(numpy.stack([ex['current']['act'] for ex in batch]).astype('float32')[:,None]).to(device)
             batch_pi = player(batch_x, normalized=True)
             batch_q = torch.from_numpy(numpy.stack([ex['current']['prob'] for ex in batch]).astype('float32')).to(device)
-            logp = torch.log(batch_pi.gather(1, batch_a.long()))
+            logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
 
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
-            iw = torch.exp((logp.clone().detach() - torch.log(batch_q)).clamp(max=0.))
+            iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
         
             loss = iw * loss_
             
@@ -205,7 +221,7 @@ def main(args):
 
             batch_pi = player(batch_x, normalized=True)
             
-            logp = torch.log(batch_pi.gather(1, batch_a.long()))
+            logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
             
             # advantage: r(s,a) + \gamma * V(s') - V(s)
             adv = batch_r + discount_factor * batch_vn - batch_v
@@ -215,12 +231,12 @@ def main(args):
             
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
-            iw = torch.exp((logp.clone().detach() - torch.log(batch_q)).clamp(max=0.))
+            iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
         
             loss = iw * loss
             
             # entropy regularization: though, it doesn't look necessary in this specific case.
-            ent = (batch_pi * torch.log(batch_pi)).sum(1)
+            ent = (batch_pi * torch.log(batch_pi+1e-8)).sum(1)
             
             if entropy == -numpy.Inf:
                 entropy = ent.mean().item()
@@ -251,6 +267,7 @@ if __name__ == '__main__':
     parser.add_argument('-buffer-size', type=int, default=50000)
     parser.add_argument('-n-frames', type=int, default=1)
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
+    parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
