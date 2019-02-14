@@ -99,13 +99,13 @@ class Buffer:
         for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
                                                                      crewards[:-1], actions[:-1], action_probs[:-1],
                                              observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
-            act_obs = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii))
-            act_obs = act_obs + observations[numpy.maximum(0, ii-self.n_frames):ii]
+            act_obs = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-1))
+            act_obs = act_obs + observations[numpy.maximum(0, ii-self.n_frames+1):ii+1]
+#             print(ii, len(act_obs))
             
-            act_obs_next = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-1))
-            act_obs_next = act_obs_next + observations[numpy.maximum(0, ii+1-self.n_frames):ii+1]
+            act_obs_next = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-2))
+            act_obs_next = act_obs_next + observations[numpy.maximum(0, ii+2-self.n_frames):ii+2]
             
-#             print(ii, len(act_obs_next))
             
             self.buffer.append({'current': {'obs': numpy.concatenate(act_obs), 
                                             'rew': r, 
