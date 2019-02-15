@@ -72,7 +72,7 @@ def main(args):
     replay_buffer = Buffer(max_items=args.buffer_size, n_frames=n_frames)
 
     n_iter = args.n_iter
-    init_collect = 1
+    init_collect = args.init_collect
     n_collect = args.n_collect
     n_value = args.n_value
     n_policy = args.n_policy
@@ -225,7 +225,7 @@ def main(args):
             
             # advantage: r(s,a) + \gamma * V(s') - V(s)
             adv = batch_r + discount_factor * batch_vn - batch_v
-            adv = adv / adv.abs().max().clamp(min=1.)
+            #adv = adv / adv.abs().max().clamp(min=1.)
             
             loss = -(adv * logp)
             
@@ -254,6 +254,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-n-iter', type=int, default=1000)
     parser.add_argument('-n-collect', type=int, default=1)
+    parser.add_argument('-init-collect', type=int, default=100)
     parser.add_argument('-n-value', type=int, default=150)
     parser.add_argument('-n-policy', type=int, default=150)
     parser.add_argument('-disp-iter', type=int, default=1)
