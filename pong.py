@@ -128,6 +128,7 @@ def main(args):
                 'n_value': n_value,
                 'n_policy': n_policy,
                 'max_len': max_len,
+                'n_hid': n_hid,
                 'batch_size': batch_size,
                 'player': player.state_dict(),
                 'value': value.state_dict(),
