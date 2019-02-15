@@ -95,7 +95,9 @@ class Buffer:
         new_n = len(observations)
         old_n = len(self.buffer)
         if new_n + old_n > self.max_items:
-            del self.buffer[:new_n]
+            idxs = numpy.random.choice(len(self.buffer),numpy.minimum(new_n, len(self.buffer)),replace=False)
+            for index in sorted(idxs, reverse=True):
+                del self.buffer[index]
         for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
                                                                      crewards[:-1], actions[:-1], action_probs[:-1],
                                              observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
@@ -120,6 +122,6 @@ class Buffer:
 
             
     def sample(self, n=100):
-        idxs = numpy.random.choice(len(self.buffer),n)
+        idxs = numpy.random.choice(len(self.buffer),numpy.minimum(n, len(self.buffer)),replace=False)
         return [self.buffer[ii] for ii in idxs]
     
