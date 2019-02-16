@@ -16,50 +16,12 @@ from time import sleep
 
 import gym
 
-from utils import Buffer, collect_one_episode, normalize_obs, copy_params, avg_params
+from utils import Buffer, collect_one_episode, copy_params, avg_params
+
+import ff
+import conv
 
 device='cuda'
-
-class ResLinear(nn.Module):
-    def __init__(self, n_in, n_out, act=nn.ReLU()):
-        super(ResLinear, self).__init__()
-        self.act = act
-        self.linear = nn.Linear(n_in, n_out)
-        self.bn = nn.BatchNorm1d(n_out)
-        
-        assert(n_in == n_out)
-    
-    def forward(self, x):
-        h = self.act(self.bn(self.linear(x)))
-        return h + x
-
-class Player(nn.Module):
-    def __init__(self, n_in=128, n_hid=100, n_out=6):
-        super(Player, self).__init__()
-        self.layers = nn.Sequential(nn.Linear(n_in, n_hid),
-                                    nn.BatchNorm1d(n_hid),
-                                    nn.ReLU(),
-                                    ResLinear(n_hid, n_hid, nn.ReLU()),
-                                    nn.Linear(n_hid, n_out))
-        self.softmax = nn.Softmax(dim=1)
-    
-    def forward(self, obs, normalized=False):
-        if normalized:
-            return self.softmax(self.layers(obs))
-        else:
-            return self.layers(obs)
-
-class Value(nn.Module):
-    def __init__(self, n_in=128, n_hid=100):
-        super(Value, self).__init__()
-        self.layers = nn.Sequential(nn.Linear(n_in, n_hid),
-                                    nn.BatchNorm1d(n_hid),
-                                    nn.ReLU(),
-                                    ResLinear(n_hid, n_hid, nn.ReLU()),
-                                    nn.Linear(n_hid, 1))
-    
-    def forward(self, obs):
-        return self.layers(obs)
 
 def main(args):
 
@@ -76,6 +38,7 @@ def main(args):
     n_collect = args.n_collect
     n_value = args.n_value
     n_policy = args.n_policy
+    n_hid = args.n_hid
 
     disp_iter = args.disp_iter
     val_iter = args.val_iter
@@ -96,12 +59,22 @@ def main(args):
 
     return_history = []
 
-    # create a policy
-    player = Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
+    if args.nn == "ff":
+        # create a policy
+        player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
 
-    # create a value estimator
-    value = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
-    value_old = Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+        # create a value estimator
+        value = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+        value_old = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+    elif args.nn == "conv":
+        # create a policy
+        player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(device)
+
+        # create a value estimator
+        value = conv.Value(n_frames, n_hid=args.n_hid).to(device)
+        value_old = conv.Value(n_frames, n_hid=args.n_hid).to(device)
+    else:
+        raise Exception('Unknown type')
 
     if args.cont:
         files = glob.glob("{}*th".format(args.saveto))
@@ -269,6 +242,7 @@ if __name__ == '__main__':
     parser.add_argument('-buffer-size', type=int, default=50000)
     parser.add_argument('-n-frames', type=int, default=1)
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
+    parser.add_argument('-nn', type=str, default='ff')
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('saveto', type=str)
 

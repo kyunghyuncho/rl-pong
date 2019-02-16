@@ -19,6 +19,8 @@ def avg_params(from_, to_, coeff=0.95):
         t_.data.copy_(coeff * t_.data + (1.-coeff) * f_.data)
         
 def normalize_obs(obs):
+    if len(obs.shape) == 3:
+        obs = obs.transpose(2, 0, 1)
     return obs.astype('float32') / 255.
 
 # collect data
@@ -35,7 +37,7 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
     actions = []
     action_probs = []
     
-    prev_obs = [numpy.zeros(128).astype('float32')] * n_frames
+    prev_obs = None
 
     obs = env.reset()
     
@@ -45,10 +47,16 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
             sleep(0.05)
             
         obs = normalize_obs(obs)
+
+        if prev_obs == None:
+            prev_obs = [obs * 0.] * n_frames
         
         prev_obs.pop(0)
         prev_obs.append(obs)
-        current_obs = numpy.concatenate(prev_obs)
+        if len(obs.shape) == 3:
+            current_obs = numpy.concatenate(prev_obs)
+        else:
+            current_obs = numpy.concatenate(prev_obs)
 
         out_probs = player(torch.from_numpy(current_obs[None,:]).to(next(player.parameters()).device), normalized=True).squeeze()
         
