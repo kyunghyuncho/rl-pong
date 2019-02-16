@@ -22,10 +22,10 @@ class ResNet(nn.Module):
                  zero_init_residual=False, 
                  n_frames=1, n_hid=64):
         super(ResNet, self).__init__()
-        self.inplanes = 64
+        self.inplanes = n_hid
         self.conv1 = nn.Conv2d(3 * n_frames, n_hid, kernel_size=7, stride=2, padding=3,
                                bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
+        self.bn1 = nn.BatchNorm2d(n_hid)
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, n_hid, layers[0])
@@ -88,8 +88,6 @@ class ResNet(nn.Module):
             x = self.softmax(x)
 
         return x
-
-
 
 def Player(n_frames=1, n_hid=64, **kwargs):
     model = ResNet(BasicBlock, [2, 2, 2, 2], n_frames=n_frames, n_hid=n_hid, num_classes=6)
