@@ -232,7 +232,7 @@ def main(args):
                 pred_y = value(batch_x).squeeze()
                 pred_next = value_old(batch_xn).squeeze().clone().detach()
                 critic_loss_ = -((batch_r + discount_factor * pred_next - pred_y) ** 2).clone().detach()
-                critic_loss_ = torch.nn.Softmax()(critic_loss_, dim=0)
+                critic_loss_ = torch.nn.Softmax(dim=0)(critic_loss_)
 
                 loss = (loss * critic_loss_).sum()
             else:
