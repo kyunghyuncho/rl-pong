@@ -40,6 +40,10 @@ def main(args):
     n_policy = args.n_policy
     n_hid = args.n_hid
 
+    critic_aware = args.critic_aware
+
+    update_every = args.update_every
+
     disp_iter = args.disp_iter
     val_iter = args.val_iter
     save_iter = args.save_iter
@@ -136,8 +140,10 @@ def main(args):
         # TD(1)
         value.train()
         for vi in range(n_value):
-            opt_player.zero_grad()
-            opt_value.zero_grad()
+            if numpy.mod(vi, update_every) == 0:
+                #print(vi, 'zeroing gradient')
+                opt_player.zero_grad()
+                opt_value.zero_grad()
             
             batch = replay_buffer.sample(batch_size)
 
@@ -162,7 +168,9 @@ def main(args):
             loss = loss.mean()
             
             loss.backward()
-            opt_value.step()
+            if numpy.mod(vi, update_every) == (update_every-1):
+                #print(vi, 'making an update')
+                opt_value.step()
         
         copy_params(value, value_old)
             
@@ -178,8 +186,9 @@ def main(args):
         value.eval()
         player.train()
         for pi in range(n_policy):
-            opt_player.zero_grad()
-            opt_value.zero_grad()
+            if numpy.mod(pi, update_every) == 0:
+                opt_player.zero_grad()
+                opt_value.zero_grad()
             
             batch = replay_buffer.sample(batch_size)
             
@@ -202,7 +211,7 @@ def main(args):
             #adv = adv / adv.abs().max().clamp(min=1.)
             
             loss = -(adv * logp)
-            
+
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
             iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
@@ -217,10 +226,21 @@ def main(args):
             else:
                 entropy = 0.9 * entropy + 0.1 * ent.mean().item()
             
-            loss = (loss + ent_coeff * ent).mean()
+            loss = (loss + ent_coeff * ent)
+            
+            if critic_aware:
+                pred_y = value(batch_x).squeeze()
+                pred_next = value_old(batch_xn).squeeze().clone().detach()
+                critic_loss_ = -((batch_r + discount_factor * pred_next - pred_y) ** 2).clone().detach()
+                critic_loss_ = torch.nn.Softmax()(critic_loss_, dim=0)
+
+                loss = (loss * critic_loss_).sum()
+            else:
+                loss = loss.mean()
             
             loss.backward()
-            opt_player.step()
+            if numpy.mod(pi, update_every) == (update_every-1):
+                opt_player.step()
 
 
 
@@ -231,6 +251,7 @@ if __name__ == '__main__':
     parser.add_argument('-init-collect', type=int, default=100)
     parser.add_argument('-n-value', type=int, default=150)
     parser.add_argument('-n-policy', type=int, default=150)
+    parser.add_argument('-update-every', type=int, default=1)
     parser.add_argument('-disp-iter', type=int, default=1)
     parser.add_argument('-val-iter', type=int, default=1)
     parser.add_argument('-save-iter', type=int, default=10)
@@ -244,6 +265,7 @@ if __name__ == '__main__':
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-nn', type=str, default='ff')
     parser.add_argument('-cont', action="store_true", default=False)
+    parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
