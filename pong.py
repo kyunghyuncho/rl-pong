@@ -3,6 +3,12 @@ from torch import nn
 from torch.distributions import Categorical
 from torch.optim import Adam, SGD
 
+import torch.multiprocessing as mp
+
+
+from multiprocessing import Process, Queue
+import queue
+
 import numpy
 
 import argparse
@@ -21,9 +27,47 @@ from utils import Buffer, collect_one_episode, copy_params, avg_params
 import ff
 import conv
 
-device='cuda'
+def simulator(idx, player_queue, episode_queue, args):
+
+    print('Starting the simulator {}'.format(idx))
+
+    env = gym.make(args.env)
+    max_len = args.max_len
+    discount_factor = args.discount_factor
+    n_frames = args.n_frames
+    device = 'cpu'
+
+    if args.nn == "ff":
+        player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
+    elif args.nn == "conv":
+        # create a policy
+        player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(device)
+    else:
+        raise Exception('Unknown type')
+
+    while True:
+        # first sync the player
+        try:
+            player_state = player_queue.get_nowait()
+            player.load_state_dict(player_state)
+        except queue.Empty:
+            pass
+
+        # run one episode
+        player.eval()
+        o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, player, max_len=max_len, discount_factor=discount_factor, n_frames=n_frames)
+        episode_queue.put((o_, r_, c_, a_, ap_, ret_))
 
 def main(args):
+
+    # start simulators
+    episode_q = Queue()
+    player_qs = []
+    simulators = []
+    for si in range(args.n_simulators):
+        player_qs.append(Queue())
+        simulators.append(mp.Process(target=simulator, args=(si, player_qs[-1], episode_q, args,)))
+        simulators[-1].start()
 
     env = gym.make(args.env)
     # env = gym.make('Assault-ram-v0')
@@ -65,18 +109,18 @@ def main(args):
 
     if args.nn == "ff":
         # create a policy
-        player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
+        player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(args.device)
 
         # create a value estimator
-        value = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
-        value_old = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(device)
+        value = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
+        value_old = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
     elif args.nn == "conv":
         # create a policy
-        player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(device)
+        player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(args.device)
 
         # create a value estimator
-        value = conv.Value(n_frames, n_hid=args.n_hid).to(device)
-        value_old = conv.Value(n_frames, n_hid=args.n_hid).to(device)
+        value = conv.Value(n_frames, n_hid=args.n_hid).to(args.device)
+        value_old = conv.Value(n_frames, n_hid=args.n_hid).to(args.device)
     else:
         raise Exception('Unknown type')
 
@@ -96,6 +140,10 @@ def main(args):
     # initialize optimizers
     opt_player = Adam(player.parameters(), lr=0.0001)
     opt_value = Adam(value.parameters(), lr=0.0001)
+
+    # start simulators
+    for si in range(args.n_simulators):
+        player_qs[si].put(player.state_dict())
 
     for ni in range(n_iter):
         if numpy.mod(ni, save_iter) == 0:
@@ -125,16 +173,39 @@ def main(args):
 
         # collect some episodes using the current policy
         # and push (obs,a,r,p(a)) tuples to the replay buffer.
-        nc = n_collect
-        if ni == 0:
-            nc = init_collect
-        for ci in range(nc):
-            o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, player, max_len=max_len, discount_factor=discount_factor, n_frames=n_frames)
-            replay_buffer.add(o_, r_, c_, a_, ap_)
-            if ret == -numpy.Inf:
-                ret = ret_
-            else:
-                ret = 0.9 * ret + 0.1 * ret_
+        #nc = n_collect
+        #if ni == 0:
+        #    nc = init_collect
+        #for ci in range(nc):
+        #    o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, player, max_len=max_len, discount_factor=discount_factor, n_frames=n_frames)
+        #    replay_buffer.add(o_, r_, c_, a_, ap_)
+        #    if ret == -numpy.Inf:
+        #        ret = ret_
+        #    else:
+        #        ret = 0.9 * ret + 0.1 * ret_
+        n_collected = 0
+        while True:
+            try:
+                epi = episode_q.get_nowait()
+                replay_buffer.add(epi[0], epi[1], epi[2], epi[3], epi[4])
+                if ret == -numpy.Inf:
+                    ret = ret_
+                else:
+                    ret = 0.9 * ret + 0.1 * epi[-1]
+            except queue.Empty:
+                if len(replay_buffer.buffer) > 0:
+                    break
+                else:
+                    continue
+            n_collected = n_collected + 1
+            if numpy.mod(n_collected, 30) == 0 and len(replay_buffer.buffer) > 0:
+                break
+        print('Buffer length', len(replay_buffer.buffer))
+
+        player.to('cpu')
+        for si in range(args.n_simulators):
+            player_qs[si].put(player.state_dict())
+        player.to(args.device)
         
         # fit a value function
         # TD(1)
@@ -192,15 +263,15 @@ def main(args):
             
             batch = replay_buffer.sample(batch_size)
             
-            batch_x = torch.from_numpy(numpy.stack([ex['current']['obs'] for ex in batch]).astype('float32')).to(device)
-            batch_xn = torch.from_numpy(numpy.stack([ex['next']['obs'] for ex in batch]).astype('float32')).to(device)
-            batch_r = torch.from_numpy(numpy.stack([ex['current']['rew'] for ex in batch]).astype('float32')[:,None]).to(device)
+            batch_x = torch.from_numpy(numpy.stack([ex['current']['obs'] for ex in batch]).astype('float32')).to(args.device)
+            batch_xn = torch.from_numpy(numpy.stack([ex['next']['obs'] for ex in batch]).astype('float32')).to(args.device)
+            batch_r = torch.from_numpy(numpy.stack([ex['current']['rew'] for ex in batch]).astype('float32')[:,None]).to(args.device)
             
             batch_v = value(batch_x).clone().detach()
             batch_vn = value(batch_xn).clone().detach()
             
-            batch_a = torch.from_numpy(numpy.stack([ex['current']['act'] for ex in batch]).astype('float32')[:,None]).to(device)
-            batch_q = torch.from_numpy(numpy.stack([ex['current']['prob'] for ex in batch]).astype('float32')).to(device)
+            batch_a = torch.from_numpy(numpy.stack([ex['current']['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
+            batch_q = torch.from_numpy(numpy.stack([ex['current']['prob'] for ex in batch]).astype('float32')).to(args.device)
 
             batch_pi = player(batch_x, normalized=True)
             
@@ -264,8 +335,10 @@ if __name__ == '__main__':
     parser.add_argument('-n-frames', type=int, default=1)
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-nn', type=str, default='ff')
+    parser.add_argument('-device', type=str, default='cuda')
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
+    parser.add_argument('-n-simulators', type=int, default=2)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
