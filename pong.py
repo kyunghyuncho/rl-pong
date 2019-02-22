@@ -1,4 +1,4 @@
-import torch
+ torch
 from torch import nn
 from torch.distributions import Categorical
 from torch.optim import Adam, SGD
@@ -218,16 +218,16 @@ def main(args):
             
             batch = replay_buffer.sample(batch_size)
 
-            batch_x = torch.from_numpy(numpy.stack([ex['current']['obs'] for ex in batch]).astype('float32')).to(device)
-            batch_r = torch.from_numpy(numpy.stack([ex['current']['rew'] for ex in batch]).astype('float32')).to(device)
-            batch_xn = torch.from_numpy(numpy.stack([ex['next']['obs'] for ex in batch]).astype('float32')).to(device)
+            batch_x = torch.from_numpy(numpy.stack([ex['current']['obs'] for ex in batch]).astype('float32')).to(args.device)
+            batch_r = torch.from_numpy(numpy.stack([ex['current']['rew'] for ex in batch]).astype('float32')).to(args.device)
+            batch_xn = torch.from_numpy(numpy.stack([ex['next']['obs'] for ex in batch]).astype('float32')).to(args.device)
             pred_y = value(batch_x).squeeze()
             pred_next = value_old(batch_xn).squeeze().clone().detach()
             loss_ = ((batch_r + discount_factor * pred_next - pred_y) ** 2)
             
-            batch_a = torch.from_numpy(numpy.stack([ex['current']['act'] for ex in batch]).astype('float32')[:,None]).to(device)
+            batch_a = torch.from_numpy(numpy.stack([ex['current']['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
             batch_pi = player(batch_x, normalized=True)
-            batch_q = torch.from_numpy(numpy.stack([ex['current']['prob'] for ex in batch]).astype('float32')).to(device)
+            batch_q = torch.from_numpy(numpy.stack([ex['current']['prob'] for ex in batch]).astype('float32')).to(args.device)
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
 
             # (clipped) importance weight: 
