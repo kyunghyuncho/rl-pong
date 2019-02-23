@@ -1,9 +1,11 @@
- torch
+import torch
 from torch import nn
 from torch.distributions import Categorical
 from torch.optim import Adam, SGD
 
 import torch.multiprocessing as mp
+
+import os
 
 
 from multiprocessing import Process, Queue
@@ -30,12 +32,15 @@ import conv
 def simulator(idx, player_queue, episode_queue, args):
 
     print('Starting the simulator {}'.format(idx))
+    os.environ["OMP_NUM_THREADS"] = "1"
+
+    device = 'cpu'
+    torch.device('cpu')
 
     env = gym.make(args.env)
     max_len = args.max_len
     discount_factor = args.discount_factor
     n_frames = args.n_frames
-    device = 'cpu'
 
     if args.nn == "ff":
         player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
@@ -94,6 +99,7 @@ def main(args):
 
     max_len = args.max_len
     batch_size = args.batch_size
+    max_episodes = args.max_episodes
 
     ent_coeff = args.ent_coeff
     discount_factor = args.discount_factor
@@ -102,6 +108,7 @@ def main(args):
     ret = -numpy.Inf
     entropy = -numpy.Inf
     valid_ret = -numpy.Inf
+    n_plays = 0
 
     offset = 0
 
@@ -134,6 +141,7 @@ def main(args):
         player.load_state_dict(checkpoint['player'])
         value.load_state_dict(checkpoint['value'])
         return_history = checkpoint['return_history']
+        n_plays = checkpoint['n_plays']
 
     copy_params(value, value_old)
 
@@ -143,7 +151,7 @@ def main(args):
 
     # start simulators
     for si in range(args.n_simulators):
-        player_qs[si].put(player.state_dict())
+        player_qs[si].put(copy.copy(player.state_dict()))
 
     for ni in range(n_iter):
         if numpy.mod(ni, save_iter) == 0:
@@ -158,6 +166,7 @@ def main(args):
                 'player': player.state_dict(),
                 'value': value.state_dict(),
                 'return_history': return_history, 
+                'n_plays': n_plays, 
                 }, '{}_{}.th'.format(args.saveto,ni+offset+1))
 
         player.eval()
@@ -188,6 +197,7 @@ def main(args):
             try:
                 epi = episode_q.get_nowait()
                 replay_buffer.add(epi[0], epi[1], epi[2], epi[3], epi[4])
+                n_plays = n_plays + 1
                 if ret == -numpy.Inf:
                     ret = ret_
                 else:
@@ -198,13 +208,13 @@ def main(args):
                 else:
                     continue
             n_collected = n_collected + 1
-            if numpy.mod(n_collected, 30) == 0 and len(replay_buffer.buffer) > 0:
+            if numpy.mod(n_collected, max_episodes) == 0 and len(replay_buffer.buffer) > 0:
                 break
         print('Buffer length', len(replay_buffer.buffer))
 
         player.to('cpu')
         for si in range(args.n_simulators):
-            player_qs[si].put(player.state_dict())
+            player_qs[si].put(copy.copy(player.state_dict()))
         player.to(args.device)
         
         # fit a value function
@@ -251,7 +261,7 @@ def main(args):
             value_loss = 0.9 * value_loss + 0.1 * loss_.mean().item()
         
         if numpy.mod(ni, disp_iter) == 0:
-            print('# plays', (ni+1) * n_collect, 'return', ret, 'value_loss', value_loss, 'entropy', -entropy)
+            print('# plays', n_plays, 'return', ret, 'value_loss', value_loss, 'entropy', -entropy)
         
         # fit a policy
         value.eval()
@@ -333,6 +343,7 @@ if __name__ == '__main__':
     parser.add_argument('-n-hid', type=int, default=256)
     parser.add_argument('-buffer-size', type=int, default=50000)
     parser.add_argument('-n-frames', type=int, default=1)
+    parser.add_argument('-max-episodes', type=int, default=100)
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-nn', type=str, default='ff')
     parser.add_argument('-device', type=str, default='cuda')
