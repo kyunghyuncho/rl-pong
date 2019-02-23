@@ -1,4 +1,5 @@
 import torch
+
 from torch import nn
 from torch.distributions import Categorical
 from torch.optim import Adam, SGD
@@ -54,7 +55,8 @@ def simulator(idx, player_queue, episode_queue, args):
         # first sync the player
         try:
             player_state = player_queue.get_nowait()
-            player.load_state_dict(player_state)
+            for p, c in zip(player.parameters(), player_state):
+                p.data.copy_(c.data)
         except queue.Empty:
             pass
 
@@ -66,6 +68,8 @@ def simulator(idx, player_queue, episode_queue, args):
 def main(args):
 
     # start simulators
+    mp.set_start_method('spawn')
+
     episode_q = Queue()
     player_qs = []
     simulators = []
@@ -118,13 +122,14 @@ def main(args):
     if args.nn == "ff":
         # create a policy
         player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(args.device)
-
+        player_copy = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to('cpu')
         # create a value estimator
         value = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
         value_old = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
     elif args.nn == "conv":
         # create a policy
         player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(args.device)
+        player_copy = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to('cpu')
 
         # create a value estimator
         value = conv.Value(n_frames, n_hid=args.n_hid).to(args.device)
@@ -153,12 +158,15 @@ def main(args):
     copy_params(value, value_old)
 
     # initialize optimizers
-    opt_player = Adam(player.parameters(), lr=0.0001)
-    opt_value = Adam(value.parameters(), lr=0.0001)
+    opt_player = eval(args.optimizer)(player.parameters(), lr=args.lr)
+    opt_value = eval(args.optimizer)(value.parameters(), lr=args.lr)
 
     # start simulators
+    copy_params(player, player_copy)
+    player.to('cpu')
     for si in range(args.n_simulators):
-        player_qs[si].put(copy.copy(player.state_dict()))
+        player_qs[si].put(copy.copy(list(player_copy.parameters())))
+    player.to(args.device)
 
     for ni in range(n_iter):
         if numpy.mod(ni, save_iter) == 0:
@@ -220,8 +228,9 @@ def main(args):
         print('Buffer length', len(replay_buffer.buffer))
 
         player.to('cpu')
+        #copy_params(player, player_copy)
         for si in range(args.n_simulators):
-            player_qs[si].put(copy.copy(player.state_dict()))
+            player_qs[si].put(copy.copy(list(player_copy.parameters())))
         player.to(args.device)
         
         # fit a value function
@@ -357,6 +366,9 @@ if __name__ == '__main__':
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-nn', type=str, default='ff')
     parser.add_argument('-device', type=str, default='cuda')
+    parser.add_argument('-optimizer', type=str, default='Adam')
+    parser.add_argument('-lr', type=float, default=1e-4)
+    parser.add_argument('-l2', type=float, default=1e-5)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('-n-simulators', type=int, default=2)
