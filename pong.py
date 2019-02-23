@@ -101,6 +101,7 @@ def main(args):
     batch_size = args.batch_size
     max_episodes = args.max_episodes
 
+    clip_coeff = args.grad_clip
     ent_coeff = args.ent_coeff
     discount_factor = args.discount_factor
 
@@ -130,6 +131,12 @@ def main(args):
         value_old = conv.Value(n_frames, n_hid=args.n_hid).to(args.device)
     else:
         raise Exception('Unknown type')
+
+    for m in player.parameters():
+        m.data.normal_(0., 0.01)
+    for m in value.parameters():
+        m.data.normal_(0., 0.01)
+
 
     if args.cont:
         files = glob.glob("{}*th".format(args.saveto))
@@ -251,6 +258,7 @@ def main(args):
             loss.backward()
             if numpy.mod(vi, update_every) == (update_every-1):
                 #print(vi, 'making an update')
+                nn.utils.clip_grad_norm_(value.parameters(), clip_coeff)
                 opt_value.step()
         
         copy_params(value, value_old)
@@ -321,6 +329,7 @@ def main(args):
             
             loss.backward()
             if numpy.mod(pi, update_every) == (update_every-1):
+                nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
                 opt_player.step()
 
 
@@ -340,6 +349,7 @@ if __name__ == '__main__':
     parser.add_argument('-batch-size', type=int, default=1000)
     parser.add_argument('-ent-coeff', type=float, default=0.)
     parser.add_argument('-discount-factor', type=float, default=0.95)
+    parser.add_argument('-grad-clip', type=float, default=1.)
     parser.add_argument('-n-hid', type=int, default=256)
     parser.add_argument('-buffer-size', type=int, default=50000)
     parser.add_argument('-n-frames', type=int, default=1)
