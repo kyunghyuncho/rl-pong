@@ -108,16 +108,19 @@ class Buffer:
         self.max_items = max_items
         self.n_frames = n_frames
         self.buffer = []
+        self.priority_buffer = []
         
     def add(self, observations, rewards, crewards, actions, action_probs):
         new_n = len(observations)
         old_n = len(self.buffer)
         if new_n + old_n > self.max_items:
-            #idxs = numpy.random.choice(len(self.buffer),numpy.minimum(new_n, len(self.buffer)),replace=False)
-            #for index in sorted(idxs, reverse=True):
-            #    del self.buffer[index]
-            for ni in range(numpy.minimum(new_n, len(self.buffer))):
-                heapq.heappop(self.buffer)
+            n_removed = numpy.minimum(new_n, len(self.buffer)) // 2
+            if n_removed > 1:
+                idxs = numpy.random.choice(len(self.buffer),n_removed,replace=False)
+                for index in sorted(idxs, reverse=True):
+                    del self.buffer[index]
+                for ni in range(n_removed):
+                    x = heapq.heappop(self.priority_buffer)
         for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
                                                                      crewards[:-1], actions[:-1], action_probs[:-1],
                                              observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
@@ -128,21 +131,37 @@ class Buffer:
             act_obs_next = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-2))
             act_obs_next = act_obs_next + observations[numpy.maximum(0, ii+2-self.n_frames):ii+2]
             
-            heapq.heappush(self.buffer, SAR({'obs': numpy.concatenate(act_obs), 
-                                            'rew': r, 
-                                            'crew': c, 
-                                            'act': a, 
-                                            'prob': p},
-                                {'obs': numpy.concatenate(act_obs_next), 
-                                         'rew': rn, 
-                                         'crew': cn, 
-                                         'act': an, 
-                                         'prob': pn}))
+            if numpy.mod(ii, 2) == 0:
+                heapq.heappush(self.priority_buffer, SAR({'obs': numpy.concatenate(act_obs), 
+                                                'rew': r, 
+                                                'crew': c, 
+                                                'act': a, 
+                                                'prob': p},
+                                    {'obs': numpy.concatenate(act_obs_next), 
+                                             'rew': rn, 
+                                             'crew': cn, 
+                                             'act': an, 
+                                             'prob': pn}))
+            else:
+                self.buffer.append(SAR({'obs': numpy.concatenate(act_obs), 
+                                                'rew': r, 
+                                                'crew': c, 
+                                                'act': a, 
+                                                'prob': p},
+                                    {'obs': numpy.concatenate(act_obs_next), 
+                                             'rew': rn, 
+                                             'crew': cn, 
+                                             'act': an, 
+                                             'prob': pn}))
 
             
     def sample(self, n=100):
-        idxs = numpy.random.choice(len(self.buffer),numpy.minimum(n, len(self.buffer)),replace=False)
-        return [self.buffer[ii] for ii in idxs]
+        idxs = numpy.random.choice(len(self.buffer),numpy.minimum(n//2, len(self.buffer)),replace=False)
+        rand_samples = [self.buffer[ii] for ii in idxs]
+        idxs = numpy.random.choice(len(self.priority_buffer),numpy.minimum(n//2, len(self.priority_buffer)),replace=False)
+        priority_samples = [self.priority_buffer[ii] for ii in idxs]
+        return rand_samples + priority_samples
+
     
 class SAR:
     def __init__(self, current_, next_):
