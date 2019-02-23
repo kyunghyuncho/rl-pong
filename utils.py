@@ -10,6 +10,8 @@ import numpy
 import copy
 from time import sleep
 
+import heapq
+
 def copy_params(from_, to_):
     for f_, t_ in zip(from_.parameters(), to_.parameters()):
         t_.data.copy_(f_.data)
@@ -65,8 +67,11 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
             if verbose:
                 print(out_probs, action)
         else:
-            act_dist = Categorical(out_probs.clamp(min=1e-8,max=1-1e-8))
-            action = act_dist.sample().item()
+            act_dist = Categorical(out_probs.clamp(min=1e-5,max=1.-1e-5))
+            try:
+                action = act_dist.sample().item()
+            except Exception:
+                print('!!!!!!!!!!!!!', out_probs)
         action_prob = out_probs[action].item()
 
         observations.append(obs)
@@ -90,7 +95,12 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
     # this is only for training, not for computing the total return of the episode of the given length
     discard = max_len // 10
         
-    return observations[:-discard], rewards[:-discard], crewards[:-discard], actions[:-discard], action_probs[:-discard], rewards.sum()
+    return observations[:-discard], \
+            rewards[:-discard], \
+            crewards[:-discard], \
+            actions[:-discard], \
+            action_probs[:-discard], \
+            rewards.sum()
 
 # simple implementation of FIFO-based replay buffer
 class Buffer:
@@ -103,9 +113,11 @@ class Buffer:
         new_n = len(observations)
         old_n = len(self.buffer)
         if new_n + old_n > self.max_items:
-            idxs = numpy.random.choice(len(self.buffer),numpy.minimum(new_n, len(self.buffer)),replace=False)
-            for index in sorted(idxs, reverse=True):
-                del self.buffer[index]
+            #idxs = numpy.random.choice(len(self.buffer),numpy.minimum(new_n, len(self.buffer)),replace=False)
+            #for index in sorted(idxs, reverse=True):
+            #    del self.buffer[index]
+            for ni in range(numpy.minimum(new_n, len(self.buffer))):
+                heapq.heappop(self.buffer)
         for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
                                                                      crewards[:-1], actions[:-1], action_probs[:-1],
                                              observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
@@ -116,20 +128,27 @@ class Buffer:
             act_obs_next = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-2))
             act_obs_next = act_obs_next + observations[numpy.maximum(0, ii+2-self.n_frames):ii+2]
             
-            
-            self.buffer.append({'current': {'obs': numpy.concatenate(act_obs), 
+            heapq.heappush(self.buffer, SAR({'obs': numpy.concatenate(act_obs), 
                                             'rew': r, 
                                             'crew': c, 
                                             'act': a, 
                                             'prob': p},
-                                'next': {'obs': numpy.concatenate(act_obs_next), 
+                                {'obs': numpy.concatenate(act_obs_next), 
                                          'rew': rn, 
                                          'crew': cn, 
                                          'act': an, 
-                                         'prob': pn}})
+                                         'prob': pn}))
 
             
     def sample(self, n=100):
         idxs = numpy.random.choice(len(self.buffer),numpy.minimum(n, len(self.buffer)),replace=False)
         return [self.buffer[ii] for ii in idxs]
     
+class SAR:
+    def __init__(self, current_, next_):
+        self.current_ = current_
+        self.next_ = next_
+
+    def __lt__(self, other):
+        return self.current_['crew'] < other.current_['crew']
+
