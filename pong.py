@@ -225,10 +225,10 @@ def main(args):
             n_collected = n_collected + 1
             if numpy.mod(n_collected, max_episodes) == 0 and len(replay_buffer.buffer) > 0:
                 break
-        print('Buffer length', len(replay_buffer.buffer))
+        print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
 
         player.to('cpu')
-        #copy_params(player, player_copy)
+        copy_params(player, player_copy)
         for si in range(args.n_simulators):
             player_qs[si].put(copy.copy(list(player_copy.parameters())))
         player.to(args.device)
