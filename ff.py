@@ -9,8 +9,7 @@ class ResLinear(nn.Module):
         super(ResLinear, self).__init__()
         self.act = act
         self.linear = nn.Linear(n_in, n_out)
-        #self.bn = nn.BatchNorm1d(n_out)
-        self.bn = lambda x: x
+        self.bn = nn.LayerNorm(n_out)
         
         assert(n_in == n_out)
     
@@ -22,7 +21,7 @@ class Player(nn.Module):
     def __init__(self, n_in=128, n_hid=100, n_out=6):
         super(Player, self).__init__()
         self.layers = nn.Sequential(nn.Linear(n_in, n_hid),
-                                    #nn.BatchNorm1d(n_hid),
+                                    nn.LayerNorm(n_hid),
                                     nn.ELU(),
                                     #nn.Dropout(), 
                                     ResLinear(n_hid, n_hid, nn.ReLU()),
@@ -40,7 +39,7 @@ class Value(nn.Module):
     def __init__(self, n_in=128, n_hid=100):
         super(Value, self).__init__()
         self.layers = nn.Sequential(nn.Linear(n_in, n_hid),
-                                    #nn.BatchNorm1d(n_hid),
+                                    nn.LayerNorm(n_hid),
                                     nn.ELU(),
                                     #nn.Dropout(), 
                                     ResLinear(n_hid, n_hid, nn.ReLU()),
