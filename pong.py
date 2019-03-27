@@ -33,7 +33,7 @@ import conv
 def simulator(idx, player_queue, episode_queue, args):
 
     print('Starting the simulator {}'.format(idx))
-    os.environ["OMP_NUM_THREADS"] = "1"
+    torch.set_num_threads(1)
 
     device = 'cpu'
     torch.device('cpu')
@@ -57,13 +57,17 @@ def simulator(idx, player_queue, episode_queue, args):
             player_state = player_queue.get_nowait()
             for p, c in zip(player.parameters(), player_state):
                 p.data.copy_(c.data)
+            #print('Simulator {} player sync\'d'.format(idx))
         except queue.Empty:
             pass
 
         # run one episode
         player.eval()
-        o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, player, max_len=max_len, discount_factor=discount_factor, n_frames=n_frames)
+        o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, 
+                player, max_len=max_len, discount_factor=discount_factor, 
+                n_frames=n_frames)
         episode_queue.put((o_, r_, c_, a_, ap_, ret_))
+        #print('Simulator {} episode done'.format(idx))
 
 def main(args):
 
@@ -84,7 +88,9 @@ def main(args):
     n_frames = args.n_frames
 
     # initialize replay buffer
-    replay_buffer = Buffer(max_items=args.buffer_size, n_frames=n_frames)
+    replay_buffer = Buffer(max_items=args.buffer_size, 
+                           n_frames=n_frames,
+                           priority_ratio=args.priority)
 
     n_iter = args.n_iter
     init_collect = args.init_collect
@@ -157,18 +163,18 @@ def main(args):
 
     copy_params(value, value_old)
 
-    # initialize optimizers
-    opt_player = eval(args.optimizer)(player.parameters(), lr=args.lr)
-    opt_value = eval(args.optimizer)(value.parameters(), lr=args.lr)
-
     # start simulators
-    copy_params(player, player_copy)
     player.to('cpu')
+    copy_params(player, player_copy)
     for si in range(args.n_simulators):
         player_qs[si].put(copy.copy(list(player_copy.parameters())))
     player.to(args.device)
 
     for ni in range(n_iter):
+        # re-initialize optimizers
+        opt_player = eval(args.optimizer)(player.parameters(), lr=args.lr)
+        opt_value = eval(args.optimizer)(value.parameters(), lr=args.lr)
+
         if numpy.mod(ni, save_iter) == 0:
             torch.save({
                 'n_iter': n_iter,
@@ -187,7 +193,10 @@ def main(args):
         player.eval()
 
         if numpy.mod(ni, val_iter) == 0:
-            _, _, _, _, _, ret_ = collect_one_episode(env, player, max_len=max_len, deterministic=True, n_frames=n_frames)
+            _, _, _, _, _, ret_ = collect_one_episode(env, player, 
+                    max_len=max_len, 
+                    deterministic=True, 
+                    n_frames=n_frames)
             return_history.append(ret_)
             if valid_ret == -numpy.Inf:
                 valid_ret = ret_
@@ -223,7 +232,8 @@ def main(args):
                 else:
                     continue
             n_collected = n_collected + 1
-            if numpy.mod(n_collected, max_episodes) == 0 and len(replay_buffer.buffer) > 0:
+            if numpy.mod(n_collected, max_episodes) == 0 \
+                    and len(replay_buffer.buffer) > 0:
                 break
         print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
 
@@ -259,15 +269,19 @@ def main(args):
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
             iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
+            # normalize across examples in the minibatch
+            iw = iw / iw.sum()
         
             loss = iw * loss_
             
             loss = loss.mean()
             
             loss.backward()
+
             if numpy.mod(vi, update_every) == (update_every-1):
                 #print(vi, 'making an update')
-                nn.utils.clip_grad_norm_(value.parameters(), clip_coeff)
+                if clip_coeff > 0.:
+                    nn.utils.clip_grad_norm_(value.parameters(), clip_coeff)
                 opt_value.step()
         
         copy_params(value, value_old)
@@ -313,18 +327,20 @@ def main(args):
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
             iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
+            # normalize across examples in the minibatch
+            iw = iw / iw.sum()
         
             loss = iw * loss
             
             # entropy regularization: though, it doesn't look necessary in this specific case.
-            ent = (batch_pi * torch.log(batch_pi+1e-8)).sum(1)
+            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
             
             if entropy == -numpy.Inf:
                 entropy = ent.mean().item()
             else:
                 entropy = 0.9 * entropy + 0.1 * ent.mean().item()
             
-            loss = (loss + ent_coeff * ent)
+            loss = (loss - ent_coeff * ent)
             
             if critic_aware:
                 pred_y = value(batch_x).squeeze()
@@ -338,7 +354,8 @@ def main(args):
             
             loss.backward()
             if numpy.mod(pi, update_every) == (update_every-1):
-                nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
+                if clip_coeff > 0.:
+                    nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
                 opt_player.step()
 
 
@@ -369,6 +386,7 @@ if __name__ == '__main__':
     parser.add_argument('-optimizer', type=str, default='Adam')
     parser.add_argument('-lr', type=float, default=1e-4)
     parser.add_argument('-l2', type=float, default=0.)
+    parser.add_argument('-priority', type=float, default=0.9)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('-n-simulators', type=int, default=2)
