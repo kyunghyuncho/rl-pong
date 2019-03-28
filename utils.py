@@ -114,15 +114,18 @@ class Buffer:
         
     def add(self, observations, rewards, crewards, actions, action_probs):
         new_n = len(observations)
-        old_n = len(self.buffer)
+        old_n = len(self.buffer) + len(self.priority_buffer)
         if new_n + old_n > self.max_items:
-            n_removed = numpy.minimum(new_n, len(self.buffer))
-            n_removed_rand = int(numpy.round(n_removed * self.priority_ratio))
+            new_n_priority = int(numpy.round(new_n * self.priority_ratio))
+            new_n_rand = new_n - new_n_priority
+
+            n_removed_rand = numpy.minimum(new_n_rand, len(self.buffer))
             if n_removed_rand > 1:
                 idxs = numpy.random.choice(len(self.buffer),n_removed_rand,replace=False)
                 for index in sorted(idxs, reverse=True):
                     del self.buffer[index]
-            n_removed_priority = n_removed - n_removed_rand
+
+            n_removed_priority = numpy.minimum(new_n_priority, len(self.priority_buffer))
             if n_removed_priority > 1:
                 for ni in range(n_removed_priority):
                     x = heapq.heappop(self.priority_buffer)
@@ -168,8 +171,11 @@ class Buffer:
         idxs = numpy.random.choice(len(self.buffer),numpy.minimum(n_samples_rand, len(self.buffer)),replace=False)
         rand_samples = [self.buffer[ii] for ii in idxs]
 
-        idxs = numpy.random.choice(len(self.priority_buffer),numpy.minimum(n_samples_priority, len(self.priority_buffer)),replace=False)
-        priority_samples = [self.priority_buffer[ii] for ii in idxs]
+        if n_samples_priority < 1:
+            priority_samples = []
+        else:
+            idxs = numpy.random.choice(len(self.priority_buffer),numpy.minimum(n_samples_priority, len(self.priority_buffer)),replace=False)
+            priority_samples = [self.priority_buffer[ii] for ii in idxs]
 
         #rand_avg= numpy.mean([s.current_['crew'] for s in rand_samples])
         #priority_avg = numpy.mean([s.current_['crew'] for s in priority_samples])
