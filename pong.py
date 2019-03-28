@@ -2,7 +2,7 @@ import torch
 
 from torch import nn
 from torch.distributions import Categorical
-from torch.optim import Adam, SGD
+from torch.optim import Adam, SGD, ASGD
 
 import torch.multiprocessing as mp
 
@@ -32,11 +32,19 @@ import conv
 
 def simulator(idx, player_queue, episode_queue, args):
 
+    seed = 0
+    for ii in range(idx):
+        seed = numpy.random.randint(0, numpy.iinfo(int).max)
+
+    torch.manual_seed(seed)
+
     print('Starting the simulator {}'.format(idx))
-    torch.set_num_threads(1)
+    os.environ['OMP_NUM_THREADS'] = '1' 
+    os.environ['MKL_NUM_THREADS'] = '1' 
 
     device = 'cpu'
     torch.device('cpu')
+    torch.set_num_threads(1)
 
     env = gym.make(args.env)
     max_len = args.max_len
@@ -52,11 +60,12 @@ def simulator(idx, player_queue, episode_queue, args):
         raise Exception('Unknown type')
 
     while True:
-        # first sync the player
+        # first sync the player if possible
         try:
             player_state = player_queue.get_nowait()
             for p, c in zip(player.parameters(), player_state):
-                p.data.copy_(c.data)
+                #p.data.copy_(c.data)
+                p.data.copy_(c)
             #print('Simulator {} player sync\'d'.format(idx))
         except queue.Empty:
             pass
@@ -70,6 +79,8 @@ def simulator(idx, player_queue, episode_queue, args):
         #print('Simulator {} episode done'.format(idx))
 
 def main(args):
+
+    torch.manual_seed(args.seed)
 
     # start simulators
     mp.set_start_method('spawn')
@@ -129,6 +140,7 @@ def main(args):
         # create a policy
         player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(args.device)
         player_copy = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to('cpu')
+
         # create a value estimator
         value = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
         value_old = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
@@ -167,14 +179,18 @@ def main(args):
     player.to('cpu')
     copy_params(player, player_copy)
     for si in range(args.n_simulators):
-        player_qs[si].put(copy.copy(list(player_copy.parameters())))
+        #player_qs[si].put(copy.deepcopy(list(player_copy.parameters())))
+        player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()])
     player.to(args.device)
 
-    for ni in range(n_iter):
-        # re-initialize optimizers
-        opt_player = eval(args.optimizer)(player.parameters(), lr=args.lr)
-        opt_value = eval(args.optimizer)(value.parameters(), lr=args.lr)
+    if args.device == 'cuda':
+        torch.set_num_threads(1)
 
+    # re-initialize optimizers
+    opt_player = eval(args.optimizer_player)(player.parameters(), lr=args.lr)
+    opt_value = eval(args.optimizer_value)(value.parameters(), lr=args.lr)
+
+    for ni in range(n_iter):
         if numpy.mod(ni, save_iter) == 0:
             torch.save({
                 'n_iter': n_iter,
@@ -204,18 +220,12 @@ def main(args):
                 valid_ret = 0.9 * valid_ret + 0.1 * ret_
             print('Valid run', ret_, valid_ret)
 
-        # collect some episodes using the current policy
-        # and push (obs,a,r,p(a)) tuples to the replay buffer.
-        #nc = n_collect
-        #if ni == 0:
-        #    nc = init_collect
-        #for ci in range(nc):
-        #    o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, player, max_len=max_len, discount_factor=discount_factor, n_frames=n_frames)
-        #    replay_buffer.add(o_, r_, c_, a_, ap_)
-        #    if ret == -numpy.Inf:
-        #        ret = ret_
-        #    else:
-        #        ret = 0.9 * ret + 0.1 * ret_
+        player.to('cpu')
+        copy_params(player, player_copy)
+        for si in range(args.n_simulators):
+            player_qs[si].put(copy.copy(list(player_copy.parameters())))
+        player.to(args.device)
+        
         n_collected = 0
         while True:
             try:
@@ -237,14 +247,8 @@ def main(args):
                 break
         print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
 
-        player.to('cpu')
-        copy_params(player, player_copy)
-        for si in range(args.n_simulators):
-            player_qs[si].put(copy.copy(list(player_copy.parameters())))
-        player.to(args.device)
-        
         # fit a value function
-        # TD(1)
+        # TD(0)
         value.train()
         for vi in range(n_value):
             if numpy.mod(vi, update_every) == 0:
@@ -259,18 +263,21 @@ def main(args):
             batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
             pred_y = value(batch_x).squeeze()
             pred_next = value_old(batch_xn).squeeze().clone().detach()
+            batch_pi = player(batch_x, normalized=True)
+
+            # entropy regularization
+            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1).clone().detach()
+            batch_r = batch_r + ent_coeff * ent
+
             loss_ = ((batch_r + discount_factor * pred_next - pred_y) ** 2)
             
             batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
-            batch_pi = player(batch_x, normalized=True)
             batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
 
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
             iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
-            # normalize across examples in the minibatch
-            iw = iw / iw.sum()
         
             loss = iw * loss_
             
@@ -307,7 +314,7 @@ def main(args):
             batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
             batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
             batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')[:,None]).to(args.device)
-            
+
             batch_v = value(batch_x).clone().detach()
             batch_vn = value(batch_xn).clone().detach()
             
@@ -318,6 +325,16 @@ def main(args):
             
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
             
+            # entropy regularization
+            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1).clone().detach()
+            
+            if entropy == -numpy.Inf:
+                entropy = ent.mean().item()
+            else:
+                entropy = 0.9 * entropy + 0.1 * ent.mean().item()
+            
+            batch_r = batch_r + ent_coeff * ent
+            
             # advantage: r(s,a) + \gamma * V(s') - V(s)
             adv = batch_r + discount_factor * batch_vn - batch_v
             #adv = adv / adv.abs().max().clamp(min=1.)
@@ -325,26 +342,13 @@ def main(args):
             loss = -(adv * logp)
 
             # (clipped) importance weight: 
-            # because the policy may have changed since the tuple was collected.
             iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
-            # normalize across examples in the minibatch
-            iw = iw / iw.sum()
         
             loss = iw * loss
             
-            # entropy regularization: though, it doesn't look necessary in this specific case.
-            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
-            
-            if entropy == -numpy.Inf:
-                entropy = ent.mean().item()
-            else:
-                entropy = 0.9 * entropy + 0.1 * ent.mean().item()
-            
-            loss = (loss - ent_coeff * ent)
-            
             if critic_aware:
                 pred_y = value(batch_x).squeeze()
-                pred_next = value_old(batch_xn).squeeze().clone().detach()
+                pred_next = value_old(batch_xn).squeeze()
                 critic_loss_ = -((batch_r + discount_factor * pred_next - pred_y) ** 2).clone().detach()
                 critic_loss_ = torch.nn.Softmax(dim=0)(critic_loss_)
 
@@ -362,6 +366,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('-seed', type=int, default=1234)
     parser.add_argument('-n-iter', type=int, default=1000)
     parser.add_argument('-n-collect', type=int, default=1)
     parser.add_argument('-init-collect', type=int, default=100)
@@ -379,14 +384,15 @@ if __name__ == '__main__':
     parser.add_argument('-n-hid', type=int, default=256)
     parser.add_argument('-buffer-size', type=int, default=50000)
     parser.add_argument('-n-frames', type=int, default=1)
-    parser.add_argument('-max-episodes', type=int, default=100)
+    parser.add_argument('-max-episodes', type=int, default=1000)
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-nn', type=str, default='ff')
     parser.add_argument('-device', type=str, default='cuda')
-    parser.add_argument('-optimizer', type=str, default='Adam')
+    parser.add_argument('-optimizer-player', type=str, default='ASGD')
+    parser.add_argument('-optimizer-value', type=str, default='Adam')
     parser.add_argument('-lr', type=float, default=1e-4)
     parser.add_argument('-l2', type=float, default=0.)
-    parser.add_argument('-priority', type=float, default=0.9)
+    parser.add_argument('-priority', type=float, default=0.)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('-n-simulators', type=int, default=2)
