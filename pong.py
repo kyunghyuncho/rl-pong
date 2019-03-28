@@ -130,6 +130,7 @@ def main(args):
     ret = -numpy.Inf
     entropy = -numpy.Inf
     valid_ret = -numpy.Inf
+    ess = -numpy.Inf
     n_plays = 0
 
     offset = 0
@@ -277,7 +278,9 @@ def main(args):
 
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
-            iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
+            log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
+            ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
+            iw = torch.exp(log_iw.clamp(max=0.))
         
             loss = iw * loss_
             
@@ -299,7 +302,11 @@ def main(args):
             value_loss = 0.9 * value_loss + 0.1 * loss_.mean().item()
         
         if numpy.mod(ni, disp_iter) == 0:
-            print('# plays', n_plays, 'return', ret, 'value_loss', value_loss, 'entropy', -entropy)
+            print('# plays', n_plays, 
+                  'return', ret, 
+                  'value_loss', value_loss, 
+                  'entropy', -entropy,
+                  'ess', ess)
         
         # fit a policy
         value.eval()
@@ -342,7 +349,14 @@ def main(args):
             loss = -(adv * logp)
 
             # (clipped) importance weight: 
-            iw = torch.exp((logp.clone().detach() - torch.log(batch_q+1e-8)).clamp(max=0.))
+            log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
+            iw = torch.exp(log_iw.clamp(max=0.))
+
+            ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
+            if ess == -numpy.Inf:
+                ess = ess_
+            else:
+                ess = 0.9 * ess + 0.1 * ess_
         
             loss = iw * loss
             
