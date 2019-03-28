@@ -59,11 +59,16 @@ def simulator(idx, player_queue, episode_queue, args):
     else:
         raise Exception('Unknown type')
 
+    n_params = len(list(player.parameters()))
+
     while True:
         # first sync the player if possible
         try:
             player_state = player_queue.get_nowait()
-            for p, c in zip(player.parameters(), player_state):
+            for p, c in zip(player.parameters(), player_state[:n_params]):
+                #p.data.copy_(c.data)
+                p.data.copy_(c)
+            for p, c in zip(player.buffers(), player_state[n_params:]):
                 #p.data.copy_(c.data)
                 p.data.copy_(c)
             #print('Simulator {} player sync\'d'.format(idx))
@@ -181,7 +186,8 @@ def main(args):
     copy_params(player, player_copy)
     for si in range(args.n_simulators):
         #player_qs[si].put(copy.deepcopy(list(player_copy.parameters())))
-        player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()])
+        player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
+                          [copy.deepcopy(p.data) for p in player_copy.buffers()])
     player.to(args.device)
 
     if args.device == 'cuda':
@@ -224,7 +230,8 @@ def main(args):
         player.to('cpu')
         copy_params(player, player_copy)
         for si in range(args.n_simulators):
-            player_qs[si].put(copy.copy(list(player_copy.parameters())))
+            player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
+                              [copy.deepcopy(p.data) for p in player_copy.buffers()])
         player.to(args.device)
         
         n_collected = 0
@@ -282,7 +289,10 @@ def main(args):
             ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
             iw = torch.exp(log_iw.clamp(max=0.))
         
-            loss = iw * loss_
+            if args.iw:
+                loss = iw * loss_
+            else:
+                loss = loss_
             
             loss = loss.mean()
             
@@ -358,7 +368,10 @@ def main(args):
             else:
                 ess = 0.9 * ess + 0.1 * ess_
         
-            loss = iw * loss
+            if args.iw:
+                loss = iw * loss
+            else:
+                loss = loss
             
             if critic_aware:
                 pred_y = value(batch_x).squeeze()
@@ -409,6 +422,7 @@ if __name__ == '__main__':
     parser.add_argument('-priority', type=float, default=0.)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
+    parser.add_argument('-iw', action="store_true", default=False)
     parser.add_argument('-n-simulators', type=int, default=2)
     parser.add_argument('saveto', type=str)
 
