@@ -14,6 +14,7 @@ python pong.py
 -n-frames 1
 -env Pong-ram-v0
 -batch-size 1024
+-update-every 1
 -n-hid 64 
 -n-value 100
 -n-policy 100
@@ -25,8 +26,7 @@ python pong.py
 -ent-coeff 10.
 -grad-clip 1.
 -optimizer-value Adam
--optimizer-player Adam
--iw ./models/pong-ff-1fr-test
+-optimizer-player Adam ./models/pong-ff-1fr-test
 ``
 
 
