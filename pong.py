@@ -67,11 +67,12 @@ def simulator(idx, player_queue, episode_queue, args):
             player_state = player_queue.get_nowait()
             for p, c in zip(player.parameters(), player_state[:n_params]):
                 #p.data.copy_(c.data)
-                p.data.copy_(c)
+                p.data.copy_(torch.from_numpy(c))
             for p, c in zip(player.buffers(), player_state[n_params:]):
                 #p.data.copy_(c.data)
-                p.data.copy_(c)
-            #print('Simulator {} player sync\'d'.format(idx))
+                p.data.copy_(torch.from_numpy(c))
+            if player_queue.qsize() > 0:
+                print('Simulator {} queue overflowing\'d'.format(idx))
         except queue.Empty:
             pass
 
@@ -186,8 +187,8 @@ def main(args):
     copy_params(player, player_copy)
     for si in range(args.n_simulators):
         #player_qs[si].put(copy.deepcopy(list(player_copy.parameters())))
-        player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
-                          [copy.deepcopy(p.data) for p in player_copy.buffers()])
+        player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                          [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
     player.to(args.device)
 
     if args.device == 'cuda':
@@ -230,8 +231,8 @@ def main(args):
         player.to('cpu')
         copy_params(player, player_copy)
         for si in range(args.n_simulators):
-            player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
-                              [copy.deepcopy(p.data) for p in player_copy.buffers()])
+            player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                              [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
         player.to(args.device)
         
         n_collected = 0
@@ -253,7 +254,7 @@ def main(args):
             if numpy.mod(n_collected, max_episodes) == 0 \
                     and len(replay_buffer.buffer) > 0:
                 break
-        print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
+        #print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
 
         # fit a value function
         # TD(0)
@@ -288,12 +289,12 @@ def main(args):
             log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
             ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
             iw = torch.exp(log_iw.clamp(max=0.))
-        
+
             if args.iw:
                 loss = iw * loss_
             else:
                 loss = loss_
-            
+
             loss = loss.mean()
             
             loss.backward()
@@ -350,13 +351,13 @@ def main(args):
             else:
                 entropy = 0.9 * entropy + 0.1 * ent.mean().item()
             
-            batch_r = batch_r + ent_coeff * ent
+            batch_r = batch_r.squeeze() + ent_coeff * ent
             
             # advantage: r(s,a) + \gamma * V(s') - V(s)
             adv = batch_r + discount_factor * batch_vn - batch_v
             #adv = adv / adv.abs().max().clamp(min=1.)
             
-            loss = -(adv * logp)
+            loss = -(adv * logp).squeeze()
 
             # (clipped) importance weight: 
             log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
@@ -376,13 +377,13 @@ def main(args):
             if critic_aware:
                 pred_y = value(batch_x).squeeze()
                 pred_next = value_old(batch_xn).squeeze()
-                critic_loss_ = -((batch_r + discount_factor * pred_next - pred_y) ** 2).clone().detach()
+                critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
                 critic_loss_ = torch.nn.Softmax(dim=0)(critic_loss_)
 
                 loss = (loss * critic_loss_).sum()
             else:
                 loss = loss.mean()
-            
+
             loss.backward()
             if numpy.mod(pi, update_every) == (update_every-1):
                 if clip_coeff > 0.:
@@ -418,7 +419,7 @@ if __name__ == '__main__':
     parser.add_argument('-optimizer-player', type=str, default='ASGD')
     parser.add_argument('-optimizer-value', type=str, default='Adam')
     parser.add_argument('-lr', type=float, default=1e-4)
-    parser.add_argument('-l2', type=float, default=0.)
+    parser.add_argument('-l2', type=float, default=1e-4)
     parser.add_argument('-priority', type=float, default=0.)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
