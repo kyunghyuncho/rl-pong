@@ -107,7 +107,8 @@ def main(args):
     # initialize replay buffer
     replay_buffer = Buffer(max_items=args.buffer_size, 
                            n_frames=n_frames,
-                           priority_ratio=args.priority)
+                           priority_ratio=args.priority,
+                           store_ratio=args.store)
 
     n_iter = args.n_iter
     init_collect = args.init_collect
@@ -419,8 +420,9 @@ if __name__ == '__main__':
     parser.add_argument('-optimizer-player', type=str, default='ASGD')
     parser.add_argument('-optimizer-value', type=str, default='Adam')
     parser.add_argument('-lr', type=float, default=1e-4)
-    parser.add_argument('-l2', type=float, default=1e-4)
+    parser.add_argument('-l2', type=float, default=0.)
     parser.add_argument('-priority', type=float, default=0.)
+    parser.add_argument('-store', type=float, default=1.)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('-iw', action="store_true", default=False)

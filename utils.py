@@ -104,18 +104,62 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
 
 # simple implementation of FIFO-based replay buffer
 class Buffer:
-    def __init__(self, max_items=10000, n_frames=1, priority_ratio=0.9):
+    def __init__(self, max_items=10000, 
+                 n_frames=1, priority_ratio=0.9, store_ratio=1.):
         self.max_items = max_items
         self.n_frames = n_frames
         self.priority_ratio = priority_ratio
+        self.store_ratio = store_ratio
 
         self.buffer = []
         self.priority_buffer = []
         
     def add(self, observations, rewards, crewards, actions, action_probs):
-        new_n = len(observations)
-        old_n = len(self.buffer) + len(self.priority_buffer)
-        if new_n + old_n > self.max_items:
+        n_priority = 0
+        n_rand = 0
+
+        for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
+                                                                     crewards[:-1], actions[:-1], action_probs[:-1],
+                                             observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
+            if numpy.random.rand() > self.store_ratio:
+                continue
+
+            act_obs = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-1))
+            act_obs = act_obs + observations[numpy.maximum(0, ii-self.n_frames+1):ii+1]
+#             print(ii, len(act_obs))
+            
+            act_obs_next = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-2))
+            act_obs_next = act_obs_next + observations[numpy.maximum(0, ii+2-self.n_frames):ii+2]
+            
+            if numpy.random.rand() <= self.priority_ratio:
+                n_priority = n_priority + 1
+                heapq.heappush(self.priority_buffer, SAR({'obs': numpy.concatenate(act_obs), 
+                                                'rew': r, 
+                                                'crew': c, 
+                                                'act': a, 
+                                                'prob': p},
+                                    {'obs': numpy.concatenate(act_obs_next), 
+                                             'rew': rn, 
+                                             'crew': cn, 
+                                             'act': an, 
+                                             'prob': pn}))
+            else:
+                n_rand = n_rand + 1
+                self.buffer.append(SAR({'obs': numpy.concatenate(act_obs), 
+                                                'rew': r, 
+                                                'crew': c, 
+                                                'act': a, 
+                                                'prob': p},
+                                    {'obs': numpy.concatenate(act_obs_next), 
+                                             'rew': rn, 
+                                             'crew': cn, 
+                                             'act': an, 
+                                             'prob': pn}))
+
+        new_n = len(self.buffer) + len(self.priority_buffer)
+        if new_n > self.max_items:
+            new_n = new_n - self.max_items
+
             new_n_priority = int(numpy.round(new_n * self.priority_ratio))
             new_n_rand = new_n - new_n_priority
 
@@ -130,38 +174,6 @@ class Buffer:
                 for ni in range(n_removed_priority):
                     x = heapq.heappop(self.priority_buffer)
 
-        for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
-                                                                     crewards[:-1], actions[:-1], action_probs[:-1],
-                                             observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
-            act_obs = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-1))
-            act_obs = act_obs + observations[numpy.maximum(0, ii-self.n_frames+1):ii+1]
-#             print(ii, len(act_obs))
-            
-            act_obs_next = [numpy.zeros(o.shape).astype('float32')] * numpy.maximum(0,(self.n_frames-ii-2))
-            act_obs_next = act_obs_next + observations[numpy.maximum(0, ii+2-self.n_frames):ii+2]
-            
-            if numpy.random.rand() <= self.priority_ratio:
-                heapq.heappush(self.priority_buffer, SAR({'obs': numpy.concatenate(act_obs), 
-                                                'rew': r, 
-                                                'crew': c, 
-                                                'act': a, 
-                                                'prob': p},
-                                    {'obs': numpy.concatenate(act_obs_next), 
-                                             'rew': rn, 
-                                             'crew': cn, 
-                                             'act': an, 
-                                             'prob': pn}))
-            else:
-                self.buffer.append(SAR({'obs': numpy.concatenate(act_obs), 
-                                                'rew': r, 
-                                                'crew': c, 
-                                                'act': a, 
-                                                'prob': p},
-                                    {'obs': numpy.concatenate(act_obs_next), 
-                                             'rew': rn, 
-                                             'crew': cn, 
-                                             'act': an, 
-                                             'prob': pn}))
 
             
     def sample(self, n=100):
