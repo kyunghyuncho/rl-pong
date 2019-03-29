@@ -275,10 +275,6 @@ def main(args):
             pred_next = value_old(batch_xn).clone().detach()
             batch_pi = player(batch_x, normalized=True)
 
-            # entropy regularization
-            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1).clone().detach()
-            batch_r = batch_r.squeeze() + ent_coeff * ent
-
             loss_ = ((batch_r + discount_factor * pred_next.squeeze() - pred_y.squeeze()) ** 2)
             
             batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
@@ -345,20 +341,20 @@ def main(args):
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
             
             # entropy regularization
-            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1).clone().detach()
-            
+            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
             if entropy == -numpy.Inf:
                 entropy = ent.mean().item()
             else:
                 entropy = 0.9 * entropy + 0.1 * ent.mean().item()
             
-            batch_r = batch_r.squeeze() + ent_coeff * ent
             
             # advantage: r(s,a) + \gamma * V(s') - V(s)
             adv = batch_r + discount_factor * batch_vn - batch_v
             #adv = adv / adv.abs().max().clamp(min=1.)
             
             loss = -(adv * logp).squeeze()
+
+            loss = loss - ent_coeff * ent
 
             # (clipped) importance weight: 
             log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
