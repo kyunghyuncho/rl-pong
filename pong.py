@@ -270,15 +270,15 @@ def main(args):
             batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
             batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')).to(args.device)
             batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
-            pred_y = value(batch_x).squeeze()
-            pred_next = value_old(batch_xn).squeeze().clone().detach()
+            pred_y = value(batch_x)
+            pred_next = value_old(batch_xn).clone().detach()
             batch_pi = player(batch_x, normalized=True)
 
             # entropy regularization
             ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1).clone().detach()
-            batch_r = batch_r + ent_coeff * ent
+            batch_r = batch_r.squeeze() + ent_coeff * ent
 
-            loss_ = ((batch_r + discount_factor * pred_next - pred_y) ** 2)
+            loss_ = ((batch_r + discount_factor * pred_next.squeeze() - pred_y.squeeze()) ** 2)
             
             batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
             batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
@@ -286,7 +286,7 @@ def main(args):
 
             # (clipped) importance weight: 
             # because the policy may have changed since the tuple was collected.
-            log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
+            log_iw = logp.squeeze().clone().detach() - torch.log(batch_q.squeeze()+1e-8)
             ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
             iw = torch.exp(log_iw.clamp(max=0.))
 
