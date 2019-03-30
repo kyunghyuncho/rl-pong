@@ -80,7 +80,8 @@ def simulator(idx, player_queue, episode_queue, args):
         player.eval()
         o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, 
                 player, max_len=max_len, discount_factor=discount_factor, 
-                n_frames=n_frames)
+                n_frames=n_frames, 
+                deterministic=numpy.random.rand() < args.deterministic_ratio)
         episode_queue.put((o_, r_, c_, a_, ap_, ret_))
         #print('Simulator {} episode done'.format(idx))
 
@@ -107,8 +108,8 @@ def main(args):
     # initialize replay buffer
     replay_buffer = Buffer(max_items=args.buffer_size, 
                            n_frames=n_frames,
-                           priority_ratio=args.priority,
-                           store_ratio=args.store)
+                           priority_ratio=args.priority_ratio,
+                           store_ratio=args.store_ratio)
 
     n_iter = args.n_iter
     init_collect = args.init_collect
@@ -417,12 +418,13 @@ if __name__ == '__main__':
     parser.add_argument('-optimizer-value', type=str, default='Adam')
     parser.add_argument('-lr', type=float, default=1e-4)
     parser.add_argument('-l2', type=float, default=0.)
-    parser.add_argument('-priority', type=float, default=0.)
-    parser.add_argument('-store', type=float, default=1.)
+    parser.add_argument('-priority-ratio', type=float, default=0.)
+    parser.add_argument('-store-ratio', type=float, default=1.)
     parser.add_argument('-cont', action="store_true", default=False)
     parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('-iw', action="store_true", default=False)
     parser.add_argument('-n-simulators', type=int, default=2)
+    parser.add_argument('-deterministic-ratio', type=float, default=0.)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
