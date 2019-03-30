@@ -15,20 +15,21 @@ There are a few bells and whistles implemented, but none of them seems to be
 useful anyway. I'll list them here with brief descriptions:
 
 * -iw: this should be used. without this flag, it will not correct the gradient
-  with the importance weights.
+  with the importance weights. <= necessary
 * -critic-aware: this should be used. probably not necessary, but it seems to
-  help at least from experiences.
+  help at least from experiences. <= necessary
 * -update-every: it accumulates the gradients over this many forward-backwad
-  procedures.
+  procedures. <= necessary with memory limitation
 * -n-value, -n-policy: the number of updates taken per iteration. i thought of
-  this as a quantity similar to an epoch in supervised learning.
+  this as a quantity similar to an epoch in supervised learning. <= robust
 * -n-simulators, -n-cores: it collects episodes from multiple processes, and
-  each process runs on n-cores many cpu cores.
+  each process runs on n-cores many cpu cores. <= depends on the resource
 * -priority-ratio: a portion of the experience replay buffer can be reserved for
-  highly rewarding tuples (i.e., tuples with high return.)
+  highly rewarding tuples (i.e., tuples with high return.) <= not necessary
 * -store-ratio: if your buffer size is small, you may not want to store all the
   tuples from a new experiences, as it will decrease the diversity of the tuples
-  and make them correlated heavily. use this to store only a small portion.
+  and make them correlated heavily. use this to store only a small portion. <=
+  not necessary
 
 ## Pong-ram-v0
 
