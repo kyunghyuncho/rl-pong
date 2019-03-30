@@ -29,7 +29,7 @@ class ResNet(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, n_hid, layers[0])
-        #self.layer2 = self._make_layer(block, n_hid, layers[1], stride=2)
+        self.layer2 = self._make_layer(block, n_hid, layers[1], stride=2)
         #self.layer3 = self._make_layer(block, n_hid, layers[2], stride=2)
         #self.layer4 = self._make_layer(block, n_hid, layers[3], stride=2)
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
@@ -76,7 +76,7 @@ class ResNet(nn.Module):
         x = self.maxpool(x)
 
         x = self.layer1(x)
-        #x = self.layer2(x)
+        x = self.layer2(x)
         #x = self.layer3(x)
         #x = self.layer4(x)
 
