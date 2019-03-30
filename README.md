@@ -9,7 +9,7 @@
 
 ``
 python pong.py
--buffer-size 15000
+-buffer-size 100000
 -init-collect 1
 -n-frames 1
 -env Pong-ram-v0
@@ -20,14 +20,45 @@ python pong.py
 -n-policy 100
 -n-iter 5000
 -nn ff
--n-simulators 4
+-n-simulators 8
 -device cuda
 -priority 0.
--ent-coeff 10.
--grad-clip 1.
+-store 1.
+-ent-coeff 0.01
 -optimizer-value Adam
--optimizer-player Adam ./models/pong-ff-1fr-test
+-optimizer-player Adam
+-iw
+-critic-aware 
+./models/pong-ff-1fr-test
 ``
+
+4 frame
+``
+python pong.py
+-buffer-size 100000
+-init-collect 1
+-n-frames 4
+-env Pong-ram-v0
+-batch-size 1024
+-update-every 1
+-n-hid 64 
+-n-value 100
+-n-policy 100
+-n-iter 5000
+-nn ff
+-n-simulators 8
+-device cuda
+-priority 0.
+-store 1.
+-ent-coeff 0.01
+-optimizer-value Adam
+-optimizer-player Adam
+-iw
+-critic-aware 
+./models/pong-ff-4fr-test
+``
+
+
 
 
 
