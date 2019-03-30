@@ -246,15 +246,16 @@ def main(args):
                 else:
                     ret = 0.9 * ret + 0.1 * epi[-1]
             except queue.Empty:
-                if len(replay_buffer.buffer) > 0:
-                    break
-                else:
-                    continue
+                break
             n_collected = n_collected + 1
             if numpy.mod(n_collected, max_episodes) == 0 \
-                    and len(replay_buffer.buffer) > 0:
+                    and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
                 break
         #print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
+
+        if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < 1:
+            continue
+
 
         # fit a value function
         # TD(0)
