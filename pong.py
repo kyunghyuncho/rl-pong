@@ -248,7 +248,7 @@ def main(args):
             except queue.Empty:
                 break
             n_collected = n_collected + 1
-            if numpy.mod(n_collected, max_episodes) == 0 \
+            if n_collected >= max_episodes \
                     and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
                 break
         #print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
