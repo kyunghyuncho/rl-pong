@@ -39,12 +39,10 @@ def simulator(idx, player_queue, episode_queue, args):
     torch.manual_seed(seed)
 
     print('Starting the simulator {}'.format(idx))
-    os.environ['OMP_NUM_THREADS'] = '1' 
-    os.environ['MKL_NUM_THREADS'] = '1' 
 
     device = 'cpu'
     torch.device('cpu')
-    torch.set_num_threads(1)
+    torch.set_num_threads(args.n_cores)
 
     env = gym.make(args.env)
     max_len = args.max_len
@@ -424,6 +422,7 @@ if __name__ == '__main__':
     parser.add_argument('-critic-aware', action="store_true", default=False)
     parser.add_argument('-iw', action="store_true", default=False)
     parser.add_argument('-n-simulators', type=int, default=2)
+    parser.add_argument('-n-cores', type=int, default=1)
     parser.add_argument('-deterministic-ratio', type=float, default=0.)
     parser.add_argument('saveto', type=str)
 
