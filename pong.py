@@ -70,7 +70,7 @@ def simulator(idx, player_queue, episode_queue, args):
                 #p.data.copy_(c.data)
                 p.data.copy_(torch.from_numpy(c))
             if player_queue.qsize() > 0:
-                print('Simulator {} queue overflowing\'d'.format(idx))
+                print('Simulator {} queue overflowing'.format(idx))
         except queue.Empty:
             pass
 
@@ -231,6 +231,10 @@ def main(args):
         player.to('cpu')
         copy_params(player, player_copy)
         for si in range(args.n_simulators):
+            # empty the queue, as the new one has arrived
+            while not player_qs[si].empty():
+                player_qs[si].get()
+            
             player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
                               [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
         player.to(args.device)
