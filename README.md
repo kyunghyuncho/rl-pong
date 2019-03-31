@@ -56,6 +56,7 @@ python pong.py
 -store-ratio 1.
 -deterministic-ratio 0.
 -ent-coeff 0.01
+-ent-factor 0.0001
 -optimizer-value Adam
 -optimizer-player Adam
 -iw
@@ -95,7 +96,7 @@ python pong.py
 
 ``
 python pong.py
--buffer-size 100000
+-buffer-size 10000
 -init-collect 1
 -n-frames 1
 -env Pong-v0
