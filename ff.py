@@ -35,7 +35,7 @@ class Player(nn.Module):
                                     nn.Linear(n_hid, n_out))
         self.softmax = nn.Softmax(dim=1)
     
-    def forward(self, obs, normalized=False):
+    def forward(self, obs, normalized=True):
         if normalized:
             return self.softmax(self.layers(obs))
         else:
