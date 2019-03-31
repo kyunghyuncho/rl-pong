@@ -199,7 +199,7 @@ def main(args):
     opt_value = eval(args.optimizer_value)(value.parameters(), lr=args.lr)
 
     for ni in range(n_iter):
-        ent_coeff = args.ent_coeff / (1 + si * args.ent_factor)
+        ent_coeff = args.ent_coeff / (1 + ni * args.ent_factor)
 
         if numpy.mod(ni, save_iter) == 0:
             torch.save({
