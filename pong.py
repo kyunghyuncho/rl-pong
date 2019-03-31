@@ -79,7 +79,7 @@ def simulator(idx, player_queue, episode_queue, args):
         o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, 
                 player, max_len=max_len, discount_factor=discount_factor, 
                 n_frames=n_frames, 
-                deterministic=numpy.random.rand() < args.deterministic_ratio)
+                deterministic=numpy.random.rand() <= args.deterministic_ratio)
         episode_queue.put((o_, r_, c_, a_, ap_, ret_))
         #print('Simulator {} episode done'.format(idx))
 
@@ -199,6 +199,8 @@ def main(args):
     opt_value = eval(args.optimizer_value)(value.parameters(), lr=args.lr)
 
     for ni in range(n_iter):
+        ent_coeff = args.ent_coeff / (1 + si * args.ent_factor)
+
         if numpy.mod(ni, save_iter) == 0:
             torch.save({
                 'n_iter': n_iter,
@@ -262,7 +264,6 @@ def main(args):
 
         if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < 1:
             continue
-
 
         # fit a value function
         # TD(0)
@@ -411,6 +412,7 @@ if __name__ == '__main__':
     parser.add_argument('-max-len', type=int, default=1000)
     parser.add_argument('-batch-size', type=int, default=1000)
     parser.add_argument('-ent-coeff', type=float, default=0.)
+    parser.add_argument('-ent-factor', type=float, default=0.)
     parser.add_argument('-discount-factor', type=float, default=0.95)
     parser.add_argument('-grad-clip', type=float, default=1.)
     parser.add_argument('-n-hid', type=int, default=256)
