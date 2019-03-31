@@ -231,9 +231,12 @@ def main(args):
         player.to('cpu')
         copy_params(player, player_copy)
         for si in range(args.n_simulators):
-            # empty the queue, as the new one has arrived
-            while not player_qs[si].empty():
-                player_qs[si].get()
+            while True:
+                try:
+                    # empty the queue, as the new one has arrived
+                    player_qs[si].get_nowait()
+                except queue.Empty:
+                    break
             
             player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
                               [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
@@ -277,7 +280,7 @@ def main(args):
             batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
             pred_y = value(batch_x)
             pred_next = value_old(batch_xn).clone().detach()
-            batch_pi = player(batch_x, normalized=True)
+            batch_pi = player(batch_x)
 
             loss_ = ((batch_r + discount_factor * pred_next.squeeze() - pred_y.squeeze()) ** 2)
             
@@ -340,7 +343,7 @@ def main(args):
             batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
             batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
 
-            batch_pi = player(batch_x, normalized=True)
+            batch_pi = player(batch_x)
             
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
             
