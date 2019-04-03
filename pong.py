@@ -199,7 +199,14 @@ def main(args):
     opt_value = eval(args.optimizer_value)(value.parameters(), lr=args.lr)
 
     for ni in range(n_iter):
+        lr = args.lr / (1 + ni * args.lr_factor)
         ent_coeff = args.ent_coeff / (1 + ni * args.ent_factor)
+        print('lr', lr, 'ent_coeff', ent_coeff)
+
+        for param_group in opt_player.param_groups:
+            param_group['lr'] = lr
+        for param_group in opt_value.param_groups:
+            param_group['lr'] = lr
 
         if numpy.mod(ni, save_iter) == 0:
             torch.save({
@@ -425,6 +432,7 @@ if __name__ == '__main__':
     parser.add_argument('-optimizer-player', type=str, default='ASGD')
     parser.add_argument('-optimizer-value', type=str, default='Adam')
     parser.add_argument('-lr', type=float, default=1e-4)
+    parser.add_argument('-lr-factor', type=float, default=0.)
     parser.add_argument('-l2', type=float, default=0.)
     parser.add_argument('-priority-ratio', type=float, default=0.)
     parser.add_argument('-store-ratio', type=float, default=1.)
