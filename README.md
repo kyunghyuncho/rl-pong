@@ -45,7 +45,7 @@ python pong.py
 -env Pong-ram-v0
 -batch-size 1024
 -update-every 1
--n-hid 64 
+-n-hid 64
 -n-value 100
 -n-policy 100
 -n-iter 5000
@@ -56,38 +56,19 @@ python pong.py
 -store-ratio 1.
 -deterministic-ratio 0.
 -ent-coeff 0.01
--ent-factor 0.0001
+-ent-factor 0.01
 -optimizer-value Adam
 -optimizer-player Adam
 -iw
+-grad-clip 1.
+-lr 0.0001
+-lr-factor 0.01
 -critic-aware 
 ./models/pong-ff-1fr-test
 ``
 
 4 frame
 ``
-python pong.py
--buffer-size 100000
--init-collect 1
--n-frames 4
--env Pong-ram-v0
--batch-size 1024
--update-every 1
--n-hid 128 
--n-value 100
--n-policy 100
--n-iter 5000
--nn ff
--n-simulators 8
--device cuda
--priority 0.
--store 1.
--ent-coeff 0.01
--optimizer-value Adam
--optimizer-player Adam
--iw
--critic-aware 
-./models/pong-ff-4fr-test
 ``
 
 ### convolutional policy
@@ -95,30 +76,6 @@ python pong.py
 1 frame
 
 ``
-python pong.py
--buffer-size 10000
--init-collect 1
--n-frames 1
--env Pong-v0
--batch-size 32
--update-every 5
--n-hid 64 
--n-value 100
--n-policy 100
--n-iter 5000
--nn conv
--n-simulators 2
--n-cores 3
--device cuda
--priority-ratio 0.
--store-ratio 1.
--deterministic-ratio 0. 
--ent-coeff 0.01
--optimizer-value Adam
--optimizer-player Adam
--iw
--critic-aware 
-./models/pong-conv-1fr-test
 ``
 
 ### playing with the policy
