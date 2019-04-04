@@ -60,7 +60,7 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
         else:
             current_obs = numpy.concatenate(prev_obs)
 
-        out_probs = player(torch.from_numpy(current_obs[None,:]).to(next(player.parameters()).device), normalized=True).squeeze()
+        out_probs = player(torch.from_numpy(current_obs[None,:]).to(next(player.parameters()).device)).squeeze()
         
         if deterministic:
             action = numpy.argmax(out_probs.to('cpu').data.numpy())
@@ -91,9 +91,10 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
         factors = (discount_factor ** numpy.arange(len(rewards)-ri))
         crewards.append(numpy.sum(rewards[ri:] * factors))
         
-    # discard the final 10%, because it really doesn't give me a good signal due to the unbounded horizon
-    # this is only for training, not for computing the total return of the episode of the given length
-    discard = max_len // 10
+    ## discard the final 10%, because it really doesn't give me a good signal due to the unbounded horizon
+    ## this is only for training, not for computing the total return of the episode of the given length
+    #discard = max_len // 10
+    discard = 1
         
     return observations[:-discard], \
             rewards[:-discard], \
