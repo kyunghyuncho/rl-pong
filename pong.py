@@ -146,6 +146,8 @@ def main(args):
     if args.nn == "ff":
         # create a policy
         player = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(args.device)
+        if args.player_coeff > 0.:
+            player_old = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(args.device)
         player_copy = ff.Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to('cpu')
 
         # create a value estimator
@@ -154,6 +156,8 @@ def main(args):
     elif args.nn == "conv":
         # create a policy
         player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(args.device)
+        if args.player_coeff > 0.:
+            player_old = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(args.device)
         player_copy = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to('cpu')
 
         # create a value estimator
@@ -336,6 +340,9 @@ def main(args):
         # fit a policy
         value.eval()
         player.train()
+        if args.player_coeff > 0.:
+            player_old.train()
+
         for pi in range(n_policy):
             if numpy.mod(pi, update_every) == 0:
                 opt_player.zero_grad()
@@ -354,8 +361,10 @@ def main(args):
             batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
 
             batch_pi = player(batch_x)
-            
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
+
+            if args.player_coeff > 0.:
+                batch_pi_old = player_old(batch_x)
             
             # entropy regularization
             ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
@@ -394,19 +403,22 @@ def main(args):
                 critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
 
                 critic_loss_ = torch.exp(critic_loss_)
-                loss = (loss * critic_loss_).mean()
+                loss = loss * critic_loss_
 
-                ## softmax across different examples doesn't make much sense
-                #critic_loss_ = torch.nn.Softmax(dim=0)(critic_loss_)
-                # loss = (loss * critic_loss_).sum()
-            else:
-                loss = loss.mean()
+            loss = loss.mean()
+
+            if args.player_coeff > 0.:
+                loss_old = -(batch_pi_old * torch.log(batch_pi + 1e-8)).sum(1).mean()
+                loss = loss + args.player_coeff * loss_old
 
             loss.backward()
             if numpy.mod(pi, update_every) == (update_every-1):
                 if clip_coeff > 0.:
                     nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
                 opt_player.step()
+
+        if args.player_coeff > 0.:
+            copy_params(player, player_old)
 
 
 
@@ -448,6 +460,7 @@ if __name__ == '__main__':
     parser.add_argument('-n-simulators', type=int, default=2)
     parser.add_argument('-n-cores', type=int, default=1)
     parser.add_argument('-deterministic-ratio', type=float, default=0.)
+    parser.add_argument('-player-coeff', type=float, default=0.)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
