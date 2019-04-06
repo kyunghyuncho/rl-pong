@@ -198,13 +198,13 @@ def main(args):
     if args.device == 'cuda':
         torch.set_num_threads(1)
 
-    for ni in range(n_iter):
-        # re-initialize optimizers
-        opt_player = eval(args.optimizer_player)(player.parameters(), 
-                                                 lr=args.lr, weight_decay=args.l2)
-        opt_value = eval(args.optimizer_value)(value.parameters(), 
-                                               lr=args.lr, weight_decay=args.l2)
+    # re-initialize optimizers
+    opt_player = eval(args.optimizer_player)(player.parameters(), 
+                                             lr=args.lr, weight_decay=args.l2)
+    opt_value = eval(args.optimizer_value)(value.parameters(), 
+                                           lr=args.lr, weight_decay=args.l2)
 
+    for ni in range(n_iter):
         lr = args.lr / (1 + ni * args.lr_factor)
         ent_coeff = args.ent_coeff / (1 + ni * args.ent_factor)
         print('lr', lr, 'ent_coeff', ent_coeff)
