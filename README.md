@@ -11,7 +11,7 @@ off-policy manner using importance sampling with the importance weight capped at
 is used for the actor (https://arxiv.org/abs/1702.02429). The negative entropy
 of the actor's output is penalized with a small coefficient.
 
-There are a few bells and whistles implemented, but none of them seems to be
+There are a few bells and whistles implemented, but not all of them seems to be
 useful anyway. I'll list them here with brief descriptions:
 
 * -player-coeff: this should be used. this minimizes the KL divergence between
@@ -32,6 +32,9 @@ useful anyway. I'll list them here with brief descriptions:
   tuples from a new experiences, as it will decrease the diversity of the tuples
   and make them correlated heavily. use this to store only a small portion. <=
   not necessary
+
+what needs to be implemented is to let the simulator pushes tuples in the middle
+of the episode without having to wait until it's terminated.
 
 ## Pong-ram-v0
 
