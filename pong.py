@@ -194,11 +194,13 @@ def main(args):
     if args.device == 'cuda':
         torch.set_num_threads(1)
 
-    # re-initialize optimizers
-    opt_player = eval(args.optimizer_player)(player.parameters(), lr=args.lr)
-    opt_value = eval(args.optimizer_value)(value.parameters(), lr=args.lr)
-
     for ni in range(n_iter):
+        # re-initialize optimizers
+        opt_player = eval(args.optimizer_player)(player.parameters(), 
+                                                 lr=args.lr, weight_decay=args.l2)
+        opt_value = eval(args.optimizer_value)(value.parameters(), 
+                                               lr=args.lr, weight_decay=args.l2)
+
         lr = args.lr / (1 + ni * args.lr_factor)
         ent_coeff = args.ent_coeff / (1 + ni * args.ent_factor)
         print('lr', lr, 'ent_coeff', ent_coeff)
@@ -390,9 +392,13 @@ def main(args):
                 pred_y = value(batch_x).squeeze()
                 pred_next = value_old(batch_xn).squeeze()
                 critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
-                critic_loss_ = torch.nn.Softmax(dim=0)(critic_loss_)
 
-                loss = (loss * critic_loss_).sum()
+                critic_loss_ = torch.exp(critic_loss_)
+                loss = (loss * critic_loss_).mean()
+
+                ## softmax across different examples doesn't make much sense
+                #critic_loss_ = torch.nn.Softmax(dim=0)(critic_loss_)
+                # loss = (loss * critic_loss_).sum()
             else:
                 loss = loss.mean()
 
