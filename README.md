@@ -14,6 +14,8 @@ of the actor's output is penalized with a small coefficient.
 There are a few bells and whistles implemented, but none of them seems to be
 useful anyway. I'll list them here with brief descriptions:
 
+* -player-coeff: this should be used. this minimizes the KL divergence between
+  the previous policy and the new policy.
 * -iw: this should be used. without this flag, it will not correct the gradient
   with the importance weights. <= necessary
 * -critic-aware: this should be used. probably not necessary, but it seems to
@@ -55,15 +57,16 @@ python pong.py
 -priority-ratio 0.
 -store-ratio 1.
 -deterministic-ratio 0.
--ent-coeff 0.01
--ent-factor 0.01
+-ent-coeff 0.
+-ent-factor 0.
 -optimizer-value Adam
 -optimizer-player Adam
 -iw
 -grad-clip 1.
 -lr 0.0001
--lr-factor 0.01
+-lr-factor 0.
 -critic-aware 
+-player-coeff 1.
 ./models/pong-ff-1fr-test
 ``
 
