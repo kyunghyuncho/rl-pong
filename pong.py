@@ -198,23 +198,27 @@ def main(args):
     if args.device == 'cuda':
         torch.set_num_threads(1)
 
-    # re-initialize optimizers
-    opt_player = eval(args.optimizer_player)(player.parameters(), 
-                                             lr=args.lr, weight_decay=args.l2)
-    opt_value = eval(args.optimizer_value)(value.parameters(), 
-                                           lr=args.lr, weight_decay=args.l2)
-
+    initial = True
+    pre_filled = 0
+        
     for ni in range(n_iter):
-        lr = args.lr / (1 + ni * args.lr_factor)
-        ent_coeff = args.ent_coeff / (1 + ni * args.ent_factor)
-        print('lr', lr, 'ent_coeff', ent_coeff)
+        # re-initialize optimizers
+        opt_player = eval(args.optimizer_player)(player.parameters(), 
+                                                 lr=args.lr, weight_decay=args.l2)
+        opt_value = eval(args.optimizer_value)(value.parameters(), 
+                                               lr=args.lr, weight_decay=args.l2)
 
-        for param_group in opt_player.param_groups:
-            param_group['lr'] = lr
-        for param_group in opt_value.param_groups:
-            param_group['lr'] = lr
+        if not initial:
+            lr = args.lr / (1 + (ni-pre_filled+1) * args.lr_factor)
+            ent_coeff = args.ent_coeff / (1 + (ni-pre_filled+1) * args.ent_factor)
+            print('lr', lr, 'ent_coeff', ent_coeff)
 
-        if numpy.mod(ni, save_iter) == 0:
+            for param_group in opt_player.param_groups:
+                param_group['lr'] = lr
+            for param_group in opt_value.param_groups:
+                param_group['lr'] = lr
+
+        if numpy.mod((ni-pre_filled+1), save_iter) == 0:
             torch.save({
                 'n_iter': n_iter,
                 'n_collect': n_collect,
@@ -227,11 +231,11 @@ def main(args):
                 'value': value.state_dict(),
                 'return_history': return_history, 
                 'n_plays': n_plays, 
-                }, '{}_{}.th'.format(args.saveto,ni+offset+1))
+                }, '{}_{}.th'.format(args.saveto,(ni-pre_filled+1)+offset+1))
 
         player.eval()
 
-        if numpy.mod(ni, val_iter) == 0:
+        if numpy.mod((ni-pre_filled+1), val_iter) == 0:
             _, _, _, _, _, ret_ = collect_one_episode(env, player, 
                     max_len=max_len, 
                     deterministic=True, 
@@ -256,7 +260,7 @@ def main(args):
             player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
                               [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
         player.to(args.device)
-        
+
         n_collected = 0
         while True:
             try:
@@ -273,10 +277,19 @@ def main(args):
             if n_collected >= max_episodes \
                     and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
                 break
-        #print('Buffer length', len(replay_buffer.buffer), len(replay_buffer.priority_buffer))
 
         if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < 1:
             continue
+
+        if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < args.initial_buffer:
+            if initial:
+                print('Pre-filling the buffer...', 
+                        len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
+                continue
+        else:
+            if initial:
+                pre_filled = ni
+                initial = False
 
         # fit a value function
         # TD(0)
@@ -330,7 +343,7 @@ def main(args):
         else:
             value_loss = 0.9 * value_loss + 0.1 * loss_.mean().item()
         
-        if numpy.mod(ni, disp_iter) == 0:
+        if numpy.mod((ni-pre_filled+1), disp_iter) == 0:
             print('# plays', n_plays, 
                   'return', ret, 
                   'value_loss', value_loss, 
@@ -399,7 +412,7 @@ def main(args):
             
             if critic_aware:
                 pred_y = value(batch_x).squeeze()
-                pred_next = value_old(batch_xn).squeeze()
+                pred_next = value(batch_xn).squeeze()
                 critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
 
                 critic_loss_ = torch.exp(critic_loss_)
@@ -461,6 +474,7 @@ if __name__ == '__main__':
     parser.add_argument('-n-cores', type=int, default=1)
     parser.add_argument('-deterministic-ratio', type=float, default=0.)
     parser.add_argument('-player-coeff', type=float, default=0.)
+    parser.add_argument('-initial-buffer', type=int, default=0)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
