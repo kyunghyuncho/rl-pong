@@ -354,7 +354,7 @@ def main(args):
         value.eval()
         player.train()
         if args.player_coeff > 0.:
-            player_old.train()
+            player_old.eval()
 
         for pi in range(n_policy):
             if numpy.mod(pi, update_every) == 0:
@@ -377,7 +377,7 @@ def main(args):
             logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
 
             if args.player_coeff > 0.:
-                batch_pi_old = player_old(batch_x)
+                batch_pi_old = player_old(batch_x).clone().detach()
             
             # entropy regularization
             ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
@@ -422,7 +422,7 @@ def main(args):
 
             if args.player_coeff > 0.:
                 loss_old = -(batch_pi_old * torch.log(batch_pi + 1e-8)).sum(1).mean()
-                loss = loss + args.player_coeff * loss_old
+                loss = (1.-args.player_coeff) * loss + args.player_coeff * loss_old
 
             loss.backward()
             if numpy.mod(pi, update_every) == (update_every-1):
