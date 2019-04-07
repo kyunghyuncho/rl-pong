@@ -15,6 +15,8 @@ import heapq
 def copy_params(from_, to_):
     for f_, t_ in zip(from_.parameters(), to_.parameters()):
         t_.data.copy_(f_.data)
+    for f_, t_ in zip(from_.buffers(), to_.buffers()):
+        t_.data.copy_(f_.data)
         
 def avg_params(from_, to_, coeff=0.95):
     for f_, t_ in zip(from_.parameters(), to_.parameters()):
