@@ -15,7 +15,7 @@ There are a few bells and whistles implemented, but not all of them seems to be
 useful anyway. I'll list them here with brief descriptions:
 
 * -player-coeff: this should be used. this minimizes the KL divergence between
-  the previous policy and the new policy.
+  the previous policy and the new policy. <= necessary
 * -iw: this should be used. without this flag, it will not correct the gradient
   with the importance weights. <= necessary
 * -critic-aware: this should be used. probably not necessary, but it seems to
