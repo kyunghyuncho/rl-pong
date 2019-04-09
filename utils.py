@@ -30,13 +30,12 @@ def normalize_obs(obs):
 # collect data
 def collect_one_episode(env, player, max_len=50, discount_factor=0.9, 
                         deterministic=False, rendering=False, verbose=False, 
-                        n_frames=1):
+                        n_frames=1, queue=None, interval=10):
     episode = []
 
     observations = []
 
     rewards = []
-    crewards = []
 
     actions = []
     action_probs = []
@@ -86,24 +85,22 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
         
         rewards.append(reward)
 
-    rewards = numpy.array(rewards)
+        if queue is not None:
+            if numpy.mod(ml+1, interval) == 0:
+                queue.put((observations, 
+                                   rewards, 
+                                   actions, 
+                                   action_probs))
+                observations = []
+                rewards = []
+                actions = []
+                action_probs = []
 
-    # it's probably not the best idea to compute the discounted cumulative returns here, but well..
-    for ri in range(len(rewards)):
-        factors = (discount_factor ** numpy.arange(len(rewards)-ri))
-        crewards.append(numpy.sum(rewards[ri:] * factors))
-        
-    ## discard the final 10%, because it really doesn't give me a good signal due to the unbounded horizon
-    ## this is only for training, not for computing the total return of the episode of the given length
-    #discard = max_len // 10
-    discard = 1
-        
-    return observations[:-discard], \
-            rewards[:-discard], \
-            crewards[:-discard], \
-            actions[:-discard], \
-            action_probs[:-discard], \
-            rewards.sum()
+    return observations, \
+            rewards, \
+            actions, \
+            action_probs, \
+            numpy.sum(rewards)
 
 # simple implementation of FIFO-based replay buffer
 class Buffer:
@@ -117,13 +114,13 @@ class Buffer:
         self.buffer = []
         self.priority_buffer = []
         
-    def add(self, observations, rewards, crewards, actions, action_probs):
+    def add(self, observations, rewards, actions, action_probs):
         n_priority = 0
         n_rand = 0
 
-        for ii, (o, r, c, a, p, on, rn, cn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
-                                                                     crewards[:-1], actions[:-1], action_probs[:-1],
-                                             observations[1:], rewards[1:], crewards[1:], actions[1:], action_probs[1:])):
+        for ii, (o, r, a, p, on, rn, an, pn) in enumerate(zip(observations[:-1], rewards[:-1], 
+                                                                     actions[:-1], action_probs[:-1],
+                                             observations[1:], rewards[1:], actions[1:], action_probs[1:])):
             if numpy.random.rand() > self.store_ratio:
                 continue
 
@@ -138,24 +135,20 @@ class Buffer:
                 n_priority = n_priority + 1
                 heapq.heappush(self.priority_buffer, SAR({'obs': numpy.concatenate(act_obs), 
                                                 'rew': r, 
-                                                'crew': c, 
                                                 'act': a, 
                                                 'prob': p},
                                     {'obs': numpy.concatenate(act_obs_next), 
                                              'rew': rn, 
-                                             'crew': cn, 
                                              'act': an, 
                                              'prob': pn}))
             else:
                 n_rand = n_rand + 1
                 self.buffer.append(SAR({'obs': numpy.concatenate(act_obs), 
                                                 'rew': r, 
-                                                'crew': c, 
                                                 'act': a, 
                                                 'prob': p},
                                     {'obs': numpy.concatenate(act_obs_next), 
                                              'rew': rn, 
-                                             'crew': cn, 
                                              'act': an, 
                                              'prob': pn}))
 
@@ -192,14 +185,6 @@ class Buffer:
             idxs = numpy.random.choice(len(self.priority_buffer),numpy.minimum(n_samples_priority, len(self.priority_buffer)),replace=False)
             priority_samples = [self.priority_buffer[ii] for ii in idxs]
 
-        #rand_avg= numpy.mean([s.current_['crew'] for s in rand_samples])
-        #priority_avg = numpy.mean([s.current_['crew'] for s in priority_samples])
-
-        #print('reward average', 
-        #      'rand', rand_avg,
-        #      '>' if rand_avg > priority_avg else '<',
-        #      'priority', priority_avg)
-
         return rand_samples + priority_samples
 
     
@@ -209,5 +194,5 @@ class SAR:
         self.next_ = next_
 
     def __lt__(self, other):
-        return self.current_['crew'] < other.current_['crew']
+        return self.current_['rew'] < other.current_['rew']
 

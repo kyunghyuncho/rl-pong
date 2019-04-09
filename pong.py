@@ -64,10 +64,8 @@ def simulator(idx, player_queue, episode_queue, args):
         try:
             player_state = player_queue.get_nowait()
             for p, c in zip(player.parameters(), player_state[:n_params]):
-                #p.data.copy_(c.data)
                 p.data.copy_(torch.from_numpy(c))
             for p, c in zip(player.buffers(), player_state[n_params:]):
-                #p.data.copy_(c.data)
                 p.data.copy_(torch.from_numpy(c))
             if player_queue.qsize() > 0:
                 print('Simulator {} queue overflowing'.format(idx))
@@ -76,12 +74,12 @@ def simulator(idx, player_queue, episode_queue, args):
 
         # run one episode
         player.eval()
-        o_, r_, c_, a_, ap_, ret_ = collect_one_episode(env, 
+        o_, r_, a_, ap_, ret_ = collect_one_episode(env, 
                 player, max_len=max_len, discount_factor=discount_factor, 
                 n_frames=n_frames, 
-                deterministic=numpy.random.rand() <= args.deterministic_ratio)
-        episode_queue.put((o_, r_, c_, a_, ap_, ret_))
-        #print('Simulator {} episode done'.format(idx))
+                deterministic=numpy.random.rand() <= args.deterministic_ratio,
+                queue=episode_queue, interval=args.collect_interval)
+        episode_queue.put((o_, r_, a_, ap_, ret_))
 
 def main(args):
 
@@ -133,11 +131,10 @@ def main(args):
     discount_factor = args.discount_factor
 
     value_loss = -numpy.Inf
-    ret = -numpy.Inf
     entropy = -numpy.Inf
     valid_ret = -numpy.Inf
     ess = -numpy.Inf
-    n_plays = 0
+    n_collected_frames = 0
 
     offset = 0
 
@@ -182,7 +179,7 @@ def main(args):
         player.load_state_dict(checkpoint['player'])
         value.load_state_dict(checkpoint['value'])
         return_history = checkpoint['return_history']
-        n_plays = checkpoint['n_plays']
+        n_collected_frames = checkpoint['n_collected_frames']
 
     copy_params(value, value_old)
 
@@ -230,13 +227,13 @@ def main(args):
                 'player': player.state_dict(),
                 'value': value.state_dict(),
                 'return_history': return_history, 
-                'n_plays': n_plays, 
+                'n_collected_frames': n_collected_frames, 
                 }, '{}_{}.th'.format(args.saveto,(ni-pre_filled+1)+offset+1))
 
         player.eval()
 
         if numpy.mod((ni-pre_filled+1), val_iter) == 0:
-            _, _, _, _, _, ret_ = collect_one_episode(env, player, 
+            _, _, _, _, ret_ = collect_one_episode(env, player, 
                     max_len=max_len, 
                     deterministic=True, 
                     n_frames=n_frames)
@@ -265,12 +262,8 @@ def main(args):
         while True:
             try:
                 epi = episode_q.get_nowait()
-                replay_buffer.add(epi[0], epi[1], epi[2], epi[3], epi[4])
-                n_plays = n_plays + 1
-                if ret == -numpy.Inf:
-                    ret = ret_
-                else:
-                    ret = 0.9 * ret + 0.1 * epi[-1]
+                replay_buffer.add(epi[0], epi[1], epi[2], epi[3])
+                n_collected_frames = n_collected_frames + len(epi[0])
             except queue.Empty:
                 break
             n_collected = n_collected + 1
@@ -290,6 +283,8 @@ def main(args):
             if initial:
                 pre_filled = ni
                 initial = False
+
+        print('Buffer size', len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
 
         # fit a value function
         # TD(0)
@@ -344,8 +339,7 @@ def main(args):
             value_loss = 0.9 * value_loss + 0.1 * loss_.mean().item()
         
         if numpy.mod((ni-pre_filled+1), disp_iter) == 0:
-            print('# plays', n_plays, 
-                  'return', ret, 
+            print('# frames', n_collected_frames, 
                   'value_loss', value_loss, 
                   'entropy', -entropy,
                   'ess', ess)
@@ -475,6 +469,7 @@ if __name__ == '__main__':
     parser.add_argument('-deterministic-ratio', type=float, default=0.)
     parser.add_argument('-player-coeff', type=float, default=0.)
     parser.add_argument('-initial-buffer', type=int, default=0)
+    parser.add_argument('-collect-interval', type=int, default=10)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
