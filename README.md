@@ -51,8 +51,8 @@ python pong.py
 -batch-size 1024
 -update-every 1
 -n-hid 64
--n-value 100
--n-policy 100
+-n-value 10
+-n-policy 10
 -n-iter 5000
 -nn ff
 -n-simulators 8
@@ -67,7 +67,7 @@ python pong.py
 -iw
 -grad-clip 1.
 -lr 0.0001
--lr-factor 0.
+-lr-factor 0.01
 -critic-aware 
 -player-coeff 1.
 ./models/pong-ff-1fr-test
