@@ -63,6 +63,10 @@ def simulator(idx, player_queue, episode_queue, args):
         # first sync the player if possible
         try:
             player_state = player_queue.get_nowait()
+
+            if type(player_state) == str and player_state == "END":
+                break
+
             for p, c in zip(player.parameters(), player_state[:n_params]):
                 p.data.copy_(torch.from_numpy(c))
             for p, c in zip(player.buffers(), player_state[n_params:]):
@@ -199,233 +203,247 @@ def main(args):
     pre_filled = 0
         
     for ni in range(n_iter):
-        # re-initialize optimizers
-        opt_player = eval(args.optimizer_player)(player.parameters(), 
-                                                 lr=args.lr, weight_decay=args.l2)
-        opt_value = eval(args.optimizer_value)(value.parameters(), 
-                                               lr=args.lr, weight_decay=args.l2)
+        try:
+            # re-initialize optimizers
+            opt_player = eval(args.optimizer_player)(player.parameters(), 
+                                                     lr=args.lr, weight_decay=args.l2)
+            opt_value = eval(args.optimizer_value)(value.parameters(), 
+                                                   lr=args.lr, weight_decay=args.l2)
 
-        if not initial:
-            lr = args.lr / (1 + (ni-pre_filled+1) * args.lr_factor)
-            ent_coeff = args.ent_coeff / (1 + (ni-pre_filled+1) * args.ent_factor)
-            print('lr', lr, 'ent_coeff', ent_coeff)
+            if not initial:
+                lr = args.lr / (1 + (ni-pre_filled+1) * args.lr_factor)
+                ent_coeff = args.ent_coeff / (1 + (ni-pre_filled+1) * args.ent_factor)
+                print('lr', lr, 'ent_coeff', ent_coeff)
 
-            for param_group in opt_player.param_groups:
-                param_group['lr'] = lr
-            for param_group in opt_value.param_groups:
-                param_group['lr'] = lr
+                for param_group in opt_player.param_groups:
+                    param_group['lr'] = lr
+                for param_group in opt_value.param_groups:
+                    param_group['lr'] = lr
 
-        if numpy.mod((ni-pre_filled+1), save_iter) == 0:
-            torch.save({
-                'n_iter': n_iter,
-                'n_collect': n_collect,
-                'n_value': n_value,
-                'n_policy': n_policy,
-                'max_len': max_len,
-                'n_hid': n_hid,
-                'batch_size': batch_size,
-                'player': player.state_dict(),
-                'value': value.state_dict(),
-                'return_history': return_history, 
-                'n_collected_frames': n_collected_frames, 
-                }, '{}_{}.th'.format(args.saveto,(ni-pre_filled+1)+offset+1))
+            if numpy.mod((ni-pre_filled+1), save_iter) == 0:
+                torch.save({
+                    'n_iter': n_iter,
+                    'n_collect': n_collect,
+                    'n_value': n_value,
+                    'n_policy': n_policy,
+                    'max_len': max_len,
+                    'n_hid': n_hid,
+                    'batch_size': batch_size,
+                    'player': player.state_dict(),
+                    'value': value.state_dict(),
+                    'return_history': return_history, 
+                    'n_collected_frames': n_collected_frames, 
+                    }, '{}_{}.th'.format(args.saveto,(ni-pre_filled+1)+offset+1))
 
-        player.eval()
+            player.eval()
 
-        if numpy.mod((ni-pre_filled+1), val_iter) == 0:
-            _, _, _, _, ret_ = collect_one_episode(env, player, 
-                    max_len=max_len, 
-                    deterministic=True, 
-                    n_frames=n_frames)
-            return_history.append(ret_)
-            if valid_ret == -numpy.Inf:
-                valid_ret = ret_
-            else:
-                valid_ret = 0.9 * valid_ret + 0.1 * ret_
-            print('Valid run', ret_, valid_ret)
+            if numpy.mod((ni-pre_filled+1), val_iter) == 0:
+                _, _, _, _, ret_ = collect_one_episode(env, player, 
+                        max_len=max_len, 
+                        deterministic=True, 
+                        n_frames=n_frames)
+                return_history.append(ret_)
+                if valid_ret == -numpy.Inf:
+                    valid_ret = ret_
+                else:
+                    valid_ret = 0.9 * valid_ret + 0.1 * ret_
+                print('Valid run', ret_, valid_ret)
 
-        player.to('cpu')
-        copy_params(player, player_copy)
-        for si in range(args.n_simulators):
+            player.to('cpu')
+            copy_params(player, player_copy)
+            for si in range(args.n_simulators):
+                while True:
+                    try:
+                        # empty the queue, as the new one has arrived
+                        player_qs[si].get_nowait()
+                    except queue.Empty:
+                        break
+                
+                player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                                  [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+            player.to(args.device)
+
+            n_collected = 0
             while True:
                 try:
-                    # empty the queue, as the new one has arrived
-                    player_qs[si].get_nowait()
+                    epi = episode_q.get_nowait()
+                    replay_buffer.add(epi[0], epi[1], epi[2], epi[3])
+                    n_collected_frames = n_collected_frames + len(epi[0])
                 except queue.Empty:
                     break
-            
-            player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
-                              [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
-        player.to(args.device)
+                n_collected = n_collected + 1
+                if n_collected >= max_episodes \
+                        and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
+                    break
 
-        n_collected = 0
-        while True:
-            try:
-                epi = episode_q.get_nowait()
-                replay_buffer.add(epi[0], epi[1], epi[2], epi[3])
-                n_collected_frames = n_collected_frames + len(epi[0])
-            except queue.Empty:
-                break
-            n_collected = n_collected + 1
-            if n_collected >= max_episodes \
-                    and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
-                break
-
-        if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < 1:
-            continue
-
-        if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < args.initial_buffer:
-            if initial:
-                print('Pre-filling the buffer...', 
-                        len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
+            if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < 1:
                 continue
-        else:
-            if initial:
-                pre_filled = ni
-                initial = False
 
-        print('Buffer size', len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
-
-        # fit a value function
-        # TD(0)
-        value.train()
-        for vi in range(n_value):
-            if numpy.mod(vi, update_every) == 0:
-                #print(vi, 'zeroing gradient')
-                opt_player.zero_grad()
-                opt_value.zero_grad()
-            
-            batch = replay_buffer.sample(batch_size)
-
-            batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
-            batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')).to(args.device)
-            batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
-            pred_y = value(batch_x)
-            pred_next = value_old(batch_xn).clone().detach()
-            batch_pi = player(batch_x)
-
-            loss_ = ((batch_r + discount_factor * pred_next.squeeze() - pred_y.squeeze()) ** 2)
-            
-            batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
-            batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
-            logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
-
-            # (clipped) importance weight: 
-            # because the policy may have changed since the tuple was collected.
-            log_iw = logp.squeeze().clone().detach() - torch.log(batch_q.squeeze()+1e-8)
-            ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
-            iw = torch.exp(log_iw.clamp(max=0.))
-
-            if args.iw:
-                loss = iw * loss_
+            if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < args.initial_buffer:
+                if initial:
+                    print('Pre-filling the buffer...', 
+                            len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
+                    continue
             else:
-                loss = loss_
+                if initial:
+                    pre_filled = ni
+                    initial = False
 
-            loss = loss.mean()
-            
-            loss.backward()
+            print('Buffer size', len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
 
-            if numpy.mod(vi, update_every) == (update_every-1):
-                #print(vi, 'making an update')
-                if clip_coeff > 0.:
-                    nn.utils.clip_grad_norm_(value.parameters(), clip_coeff)
-                opt_value.step()
-        
-        copy_params(value, value_old)
-            
-        if value_loss < 0.:
-            value_loss = loss_.mean().item()
-        else:
-            value_loss = 0.9 * value_loss + 0.1 * loss_.mean().item()
-        
-        if numpy.mod((ni-pre_filled+1), disp_iter) == 0:
-            print('# frames', n_collected_frames, 
-                  'value_loss', value_loss, 
-                  'entropy', -entropy,
-                  'ess', ess)
-        
-        # fit a policy
-        value.eval()
-        player.train()
-        if args.player_coeff > 0.:
-            player_old.eval()
+            # fit a value function
+            # TD(0)
+            value.train()
+            for vi in range(n_value):
+                if numpy.mod(vi, update_every) == 0:
+                    #print(vi, 'zeroing gradient')
+                    opt_player.zero_grad()
+                    opt_value.zero_grad()
+                
+                batch = replay_buffer.sample(batch_size)
 
-        for pi in range(n_policy):
-            if numpy.mod(pi, update_every) == 0:
-                opt_player.zero_grad()
-                opt_value.zero_grad()
-            
-            batch = replay_buffer.sample(batch_size)
-            
-            batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
-            batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
-            batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')[:,None]).to(args.device)
+                batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
+                batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')).to(args.device)
+                batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
+                pred_y = value(batch_x)
+                pred_next = value_old(batch_xn).clone().detach()
+                batch_pi = player(batch_x)
 
-            batch_v = value(batch_x).clone().detach()
-            batch_vn = value(batch_xn).clone().detach()
-            
-            batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
-            batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
+                loss_ = ((batch_r + discount_factor * pred_next.squeeze() - pred_y.squeeze()) ** 2)
+                
+                batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
+                batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
+                logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
 
-            batch_pi = player(batch_x)
-            logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
+                # (clipped) importance weight: 
+                # because the policy may have changed since the tuple was collected.
+                log_iw = logp.squeeze().clone().detach() - torch.log(batch_q.squeeze()+1e-8)
+                ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
+                iw = torch.exp(log_iw.clamp(max=0.))
+
+                if args.iw:
+                    loss = iw * loss_
+                else:
+                    loss = loss_
+
+                loss = loss.mean()
+                
+                loss.backward()
+
+                if numpy.mod(vi, update_every) == (update_every-1):
+                    #print(vi, 'making an update')
+                    if clip_coeff > 0.:
+                        nn.utils.clip_grad_norm_(value.parameters(), clip_coeff)
+                    opt_value.step()
+            
+            copy_params(value, value_old)
+                
+            if value_loss < 0.:
+                value_loss = loss_.mean().item()
+            else:
+                value_loss = 0.9 * value_loss + 0.1 * loss_.mean().item()
+            
+            if numpy.mod((ni-pre_filled+1), disp_iter) == 0:
+                print('# frames', n_collected_frames, 
+                      'value_loss', value_loss, 
+                      'entropy', -entropy,
+                      'ess', ess)
+            
+            # fit a policy
+            value.eval()
+            player.train()
+            if args.player_coeff > 0.:
+                player_old.eval()
+
+            for pi in range(n_policy):
+                if numpy.mod(pi, update_every) == 0:
+                    opt_player.zero_grad()
+                    opt_value.zero_grad()
+                
+                batch = replay_buffer.sample(batch_size)
+                
+                batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
+                batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
+                batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')[:,None]).to(args.device)
+
+                batch_v = value(batch_x).clone().detach()
+                batch_vn = value(batch_xn).clone().detach()
+                
+                batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
+                batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
+
+                batch_pi = player(batch_x)
+                logp = torch.log(batch_pi.gather(1, batch_a.long())+1e-8)
+
+                if args.player_coeff > 0.:
+                    batch_pi_old = player_old(batch_x).clone().detach()
+                
+                # entropy regularization
+                ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
+                if entropy == -numpy.Inf:
+                    entropy = ent.mean().item()
+                else:
+                    entropy = 0.9 * entropy + 0.1 * ent.mean().item()
+                
+                
+                # advantage: r(s,a) + \gamma * V(s') - V(s)
+                adv = batch_r + discount_factor * batch_vn - batch_v
+                #adv = adv / adv.abs().max().clamp(min=1.)
+                
+                loss = -(adv * logp).squeeze()
+
+                loss = loss - ent_coeff * ent
+
+                # (clipped) importance weight: 
+                log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
+                iw = torch.exp(log_iw.clamp(max=0.))
+
+                ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
+                if ess == -numpy.Inf:
+                    ess = ess_
+                else:
+                    ess = 0.9 * ess + 0.1 * ess_
+            
+                if args.iw:
+                    loss = iw * loss
+                else:
+                    loss = loss
+                
+                if critic_aware:
+                    pred_y = value(batch_x).squeeze()
+                    pred_next = value(batch_xn).squeeze()
+                    critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
+
+                    critic_loss_ = torch.exp(critic_loss_)
+                    loss = loss * critic_loss_
+
+                loss = loss.mean()
+
+                if args.player_coeff > 0.:
+                    loss_old = -(batch_pi_old * torch.log(batch_pi + 1e-8)).sum(1).mean()
+                    loss = (1.-args.player_coeff) * loss + args.player_coeff * loss_old
+
+                loss.backward()
+                if numpy.mod(pi, update_every) == (update_every-1):
+                    if clip_coeff > 0.:
+                        nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
+                    opt_player.step()
 
             if args.player_coeff > 0.:
-                batch_pi_old = player_old(batch_x).clone().detach()
-            
-            # entropy regularization
-            ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
-            if entropy == -numpy.Inf:
-                entropy = ent.mean().item()
-            else:
-                entropy = 0.9 * entropy + 0.1 * ent.mean().item()
-            
-            
-            # advantage: r(s,a) + \gamma * V(s') - V(s)
-            adv = batch_r + discount_factor * batch_vn - batch_v
-            #adv = adv / adv.abs().max().clamp(min=1.)
-            
-            loss = -(adv * logp).squeeze()
+                copy_params(player, player_old)
+        except KeyboardInterrupt:
+            print('Terminating...')
+            break
 
-            loss = loss - ent_coeff * ent
+    for si in range(args.n_simulators):
+        player_qs[si].put("END")
 
-            # (clipped) importance weight: 
-            log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
-            iw = torch.exp(log_iw.clamp(max=0.))
+    print('Waiting for the simulators...')
 
-            ess_ = torch.exp(-torch.logsumexp(2 * log_iw, dim=0)).item()
-            if ess == -numpy.Inf:
-                ess = ess_
-            else:
-                ess = 0.9 * ess + 0.1 * ess_
-        
-            if args.iw:
-                loss = iw * loss
-            else:
-                loss = loss
-            
-            if critic_aware:
-                pred_y = value(batch_x).squeeze()
-                pred_next = value(batch_xn).squeeze()
-                critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
+    for si in range(args.n_simulators):
+        simulators[-1].join()
 
-                critic_loss_ = torch.exp(critic_loss_)
-                loss = loss * critic_loss_
-
-            loss = loss.mean()
-
-            if args.player_coeff > 0.:
-                loss_old = -(batch_pi_old * torch.log(batch_pi + 1e-8)).sum(1).mean()
-                loss = (1.-args.player_coeff) * loss + args.player_coeff * loss_old
-
-            loss.backward()
-            if numpy.mod(pi, update_every) == (update_every-1):
-                if clip_coeff > 0.:
-                    nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
-                opt_player.step()
-
-        if args.player_coeff > 0.:
-            copy_params(player, player_old)
+    print('Done')
 
 
 
