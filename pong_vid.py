@@ -17,7 +17,10 @@ from time import sleep
 import gym
 
 from utils import Buffer, collect_one_episode, normalize_obs, copy_params, avg_params
-from pong import Player, Value
+
+import ff
+import conv
+
 
 def main(args):
 
@@ -29,17 +32,24 @@ def main(args):
     n_frames = args.n_frames
     max_len = args.max_len
 
-    # create a policy
-    player = Player(n_in=128 * n_frames, n_hid=args.n_hid, n_out=6).to(device)
-
     print('Reloading from {}'.format(args.saveto))
     checkpoint = torch.load(args.saveto, map_location=device)
+
+    if args.nn == "ff":
+        # create a policy
+        player = ff.Player(n_in=128 * n_frames, n_hid=checkpoint['n_hid'], n_out=6).to(device)
+    elif args.nn == "conv":
+        # create a policy
+        player = conv.Player(n_frames=n_frames, n_hid=checkpoint['n_hid']).to(device)
+    else:
+        raise Exception('Unknown type')
+
     player.load_state_dict(checkpoint['player'])
 
     player.eval()
 
     _, _, _, _, _, ret_ = collect_one_episode(env, player, max_len=max_len, 
-                                              deterministic=True, 
+                                              deterministic=not args.stochastic, 
                                               n_frames=n_frames,
                                               rendering=True)
 
@@ -52,6 +62,8 @@ if __name__ == '__main__':
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-device', type=str, default='cuda')
     parser.add_argument('-n-hid', type=int, default=256)
+    parser.add_argument('-nn', type=str, default='ff')
+    parser.add_argument('-stochastic', action="store_true", default=False)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
