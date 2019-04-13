@@ -30,7 +30,7 @@ from utils import Buffer, collect_one_episode, copy_params, avg_params
 import ff
 import conv
 
-def simulator(idx, player_queue, episode_queue, args):
+def simulator(idx, player_queue, episode_queue, args, valid=False):
 
     seed = 0
     for ii in range(idx):
@@ -78,12 +78,20 @@ def simulator(idx, player_queue, episode_queue, args):
 
         # run one episode
         player.eval()
-        o_, r_, a_, ap_, ret_ = collect_one_episode(env, 
-                player, max_len=max_len, discount_factor=discount_factor, 
-                n_frames=n_frames, 
-                deterministic=numpy.random.rand() <= args.deterministic_ratio,
-                queue=episode_queue, interval=args.collect_interval)
-        episode_queue.put((o_, r_, a_, ap_, ret_))
+        if valid:
+            _, _, _, _, ret_ = collect_one_episode(env, 
+                    player, max_len=max_len, discount_factor=discount_factor, 
+                    n_frames=n_frames, 
+                    deterministic=True,
+                    queue=None, interval=-1)
+            episode_queue.put(ret_)
+        else:
+            o_, r_, a_, ap_, ret_ = collect_one_episode(env, 
+                    player, max_len=max_len, discount_factor=discount_factor, 
+                    n_frames=n_frames, 
+                    deterministic=numpy.random.rand() <= args.deterministic_ratio,
+                    queue=episode_queue, interval=args.collect_interval)
+            episode_queue.put((o_, r_, a_, ap_, ret_))
 
 def main(args):
 
@@ -97,8 +105,13 @@ def main(args):
     simulators = []
     for si in range(args.n_simulators):
         player_qs.append(Queue())
-        simulators.append(mp.Process(target=simulator, args=(si, player_qs[-1], episode_q, args,)))
+        simulators.append(mp.Process(target=simulator, args=(si, player_qs[-1], episode_q, args, False,)))
         simulators[-1].start()
+
+    return_q = Queue()
+    valid_q = Queue()
+    valid_simulator = mp.Process(target=simulator, args=(si, valid_q, return_q, args, True,))
+    valid_simulator.start()
 
     env = gym.make(args.env)
     # env = gym.make('Assault-ram-v0')
@@ -194,6 +207,8 @@ def main(args):
         #player_qs[si].put(copy.deepcopy(list(player_copy.parameters())))
         player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
                           [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+    valid_q.put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
     player.to(args.device)
 
     if args.device == 'cuda':
@@ -238,16 +253,19 @@ def main(args):
             player.eval()
 
             if numpy.mod((ni-pre_filled+1), val_iter) == 0:
-                _, _, _, _, ret_ = collect_one_episode(env, player, 
-                        max_len=max_len, 
-                        deterministic=True, 
-                        n_frames=n_frames)
-                return_history.append(ret_)
-                if valid_ret == -numpy.Inf:
-                    valid_ret = ret_
-                else:
-                    valid_ret = 0.9 * valid_ret + 0.1 * ret_
-                print('Valid run', ret_, valid_ret)
+                ret_ = -numpy.Inf
+                while True:
+                    try:
+                        ret_ = return_q.get_nowait()
+                    except queue.Empty:
+                        break
+                if ret_ != -numpy.Inf:
+                    return_history.append(ret_)
+                    if valid_ret == -numpy.Inf:
+                        valid_ret = ret_
+                    else:
+                        valid_ret = 0.9 * valid_ret + 0.1 * ret_
+                    print('Valid run', ret_, valid_ret)
 
             player.to('cpu')
             copy_params(player, player_copy)
@@ -261,6 +279,15 @@ def main(args):
                 
                 player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
                                   [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+            while True:
+                try:
+                    # empty the queue, as the new one has arrived
+                    valid_q.get_nowait()
+                except queue.Empty:
+                    break
+            valid_q.put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                        [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+
             player.to(args.device)
 
             n_collected = 0
@@ -289,7 +316,7 @@ def main(args):
                     pre_filled = ni
                     initial = False
 
-            print('Buffer size', len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
+            #print('Buffer size', len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
 
             # fit a value function
             # TD(0)
