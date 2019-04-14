@@ -22,6 +22,7 @@ import glob
 
 import copy
 from time import sleep
+import time
 
 import gym
 
@@ -37,6 +38,9 @@ def simulator(idx, player_queue, episode_queue, args, valid=False):
         seed = numpy.random.randint(0, numpy.iinfo(int).max)
 
     torch.manual_seed(seed)
+
+    if valid:
+        idx = "valid"
 
     print('Starting the simulator {}'.format(idx))
 
@@ -110,7 +114,7 @@ def main(args):
 
     return_q = Queue()
     valid_q = Queue()
-    valid_simulator = mp.Process(target=simulator, args=(si, valid_q, return_q, args, True,))
+    valid_simulator = mp.Process(target=simulator, args=(args.n_simulators, valid_q, return_q, args, True,))
     valid_simulator.start()
 
     env = gym.make(args.env)
@@ -141,7 +145,7 @@ def main(args):
 
     max_len = args.max_len
     batch_size = args.batch_size
-    max_episodes = args.max_episodes
+    max_collected_frames = args.max_collected_frames
 
     clip_coeff = args.grad_clip
     ent_coeff = args.ent_coeff
@@ -298,8 +302,7 @@ def main(args):
                     n_collected_frames = n_collected_frames + len(epi[0])
                 except queue.Empty:
                     break
-                n_collected = n_collected + 1
-                if n_collected >= max_episodes \
+                if n_collected_frames >= max_collected_frames \
                         and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
                     break
 
@@ -387,15 +390,54 @@ def main(args):
                     opt_player.zero_grad()
                     opt_value.zero_grad()
                 
+                #st = time.time()
+
                 batch = replay_buffer.sample(batch_size)
+
+                #print('batch collection took', time.time()-st)
                 
-                batch_x = torch.from_numpy(numpy.stack([ex.current_['obs'] for ex in batch]).astype('float32')).to(args.device)
-                batch_xn = torch.from_numpy(numpy.stack([ex.next_['obs'] for ex in batch]).astype('float32')).to(args.device)
-                batch_r = torch.from_numpy(numpy.stack([ex.current_['rew'] for ex in batch]).astype('float32')[:,None]).to(args.device)
+                #st = time.time()
+
+                #batch_x = [ex.current_['obs'] for ex in batch]
+                #batch_xn = [ex.next_['obs'] for ex in batch]
+                #batch_r = [ex.current_['rew'] for ex in batch]
+
+                #print('list construction took', time.time()-st)
+
+                #st = time.time()
+
+                batch_x = numpy.zeros(tuple([len(batch)] + list(batch[0].current_['obs'].shape)), dtype='float32')
+                batch_xn = numpy.zeros(tuple([len(batch)] + list(batch[0].current_['obs'].shape)), dtype='float32')
+                batch_r = numpy.zeros((len(batch)), dtype='float32')[:, None]
+
+                for ei, ex in enumerate(batch):
+                    batch_x[ei,:] = ex.current_['obs']
+                    batch_xn[ei,:] = ex.next_['obs']
+                    batch_r[ei,0] = ex.current_['rew']
+
+                #batch_x = numpy.stack(batch_x).astype('float32')
+                #batch_xn = numpy.stack(batch_xn).astype('float32')
+                #batch_r = numpy.stack(batch_r).astype('float32')[:,None]
+
+                #print('batch stack for value took', time.time()-st)
+
+                #st = time.time()
+
+                batch_x = torch.from_numpy(batch_x).to(args.device)
+                batch_xn = torch.from_numpy(batch_xn).to(args.device)
+                batch_r = torch.from_numpy(batch_r).to(args.device)
+
+                #print('batch push for value took', time.time()-st)
+
+                #st = time.time()
 
                 batch_v = value(batch_x).clone().detach()
                 batch_vn = value(batch_xn).clone().detach()
+
+                #print('value forward pass took', time.time()-st)
                 
+                #st = time.time()
+
                 batch_a = torch.from_numpy(numpy.stack([ex.current_['act'] for ex in batch]).astype('float32')[:,None]).to(args.device)
                 batch_q = torch.from_numpy(numpy.stack([ex.current_['prob'] for ex in batch]).astype('float32')).to(args.device)
 
@@ -495,7 +537,7 @@ if __name__ == '__main__':
     parser.add_argument('-n-hid', type=int, default=256)
     parser.add_argument('-buffer-size', type=int, default=50000)
     parser.add_argument('-n-frames', type=int, default=1)
-    parser.add_argument('-max-episodes', type=int, default=1000)
+    parser.add_argument('-max-collected-frames', type=int, default=1000)
     parser.add_argument('-env', type=str, default='Pong-ram-v0')
     parser.add_argument('-nn', type=str, default='ff')
     parser.add_argument('-device', type=str, default='cuda')
