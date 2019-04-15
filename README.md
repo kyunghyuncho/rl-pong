@@ -40,48 +40,17 @@ of the episode without having to wait until it's terminated.
 
 ### feedforward policy
 
-1 frame
-
-``
-python pong.py
--buffer-size 100000
--init-collect 1
--n-frames 1
--env Pong-ram-v0
--batch-size 1024
--update-every 1
--n-hid 64
--n-value 10
--n-policy 10
--n-iter 5000
--nn ff
--n-simulators 8
--device cuda
--priority-ratio 0.
--store-ratio 1.
--deterministic-ratio 0.
--ent-coeff 0.
--ent-factor 0.
--optimizer-value Adam
--optimizer-player Adam
--iw
--grad-clip 1.
--lr 0.0001
--lr-factor 0.01
--critic-aware 
--player-coeff 1.
-./models/pong-ff-1fr-test
-``
-
 4 frame
 ``
+python pong.py -buffer-size 100 -init-collect 1 -n-frames 4 -env Pong-v0 -batch-size 1024 -update-every 1 -n-hid 128 -n-value 50 -n-policy 50 -n-iter 5000 -nn ff -n-simulators 5 -device cuda -priority-ratio 0.  -store-ratio 1.  -deterministic-ratio 0.  -ent-coeff 0. -ent-factor 0. -optimizer-value Adam -optimizer-player Adam -iw -critic-aware  -lr 0.0001 -lr-factor 0.001 -player-coeff .5 -collect-interval 10 ./models/pong-ff-4fr-test
 ``
 
 ### convolutional policy
 
-1 frame
+4 frame
 
 ``
+python pong.py -buffer-size 100 -init-collect 1 -n-frames 4 -env Pong-v0 -batch-size 1024 -update-every 1 -n-hid 128 -n-value 50 -n-policy 50 -n-iter 5000 -nn conv -n-simulators 5 -device cuda -priority-ratio 0.  -store-ratio 1.  -deterministic-ratio 0.  -ent-coeff 0. -ent-factor 0. -optimizer-value Adam -optimizer-player Adam -iw -critic-aware  -lr 0.0001 -lr-factor 0.001 -player-coeff .5 -collect-interval 10 -resize 48,48 ./models/pong-conv-4fr-test
 ``
 
 ### playing with the policy

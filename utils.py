@@ -5,6 +5,8 @@ from torch import nn
 from torch.distributions import Categorical
 from torch.optim import Adam, SGD
 
+from skimage import transform
+
 import numpy
 
 import copy
@@ -30,7 +32,8 @@ def normalize_obs(obs):
 # collect data
 def collect_one_episode(env, player, max_len=50, discount_factor=0.9, 
                         deterministic=False, rendering=False, verbose=False, 
-                        n_frames=1, queue=None, interval=10):
+                        n_frames=1, queue=None, interval=10,
+                        resize=None):
     episode = []
 
     observations = []
@@ -50,6 +53,11 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
             sleep(0.05)
             
         obs = normalize_obs(obs)
+        if resize is not None:
+            #print('before', obs.shape, type(obs), obs.dtype)
+            obs = transform.resize(obs.transpose(1, 2, 0), resize).transpose(2, 0, 1)
+            obs = obs.astype('float32')
+            #print('after', obs.shape, type(obs), obs.dtype)
 
         if prev_obs == None:
             prev_obs = [obs * 0.] * n_frames

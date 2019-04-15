@@ -23,7 +23,7 @@ class ResNet(nn.Module):
         super(ResNet, self).__init__()
         self.value = value
         self.inplanes = n_hid
-        self.initial_pool = nn.MaxPool2d(kernel_size=4, stride=4, padding=2)
+        #self.initial_pool = nn.MaxPool2d(kernel_size=4, stride=4, padding=2)
         self.conv1 = nn.Conv2d(3 * n_frames, n_hid, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(n_hid)
@@ -36,6 +36,7 @@ class ResNet(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Sequential(
                 nn.Linear(n_hid * block.expansion, 2 * n_hid),
+                nn.BatchNorm1d(2 * n_hid),
                 nn.ReLU(),
                 nn.Linear(2 * n_hid, num_classes),
                 )
@@ -76,7 +77,7 @@ class ResNet(nn.Module):
 
     def forward(self, x):
 
-        x = self.initial_pool(x)
+        #x = self.initial_pool(x)
 
         x = self.conv1(x)
         x = self.bn1(x)

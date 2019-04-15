@@ -62,6 +62,10 @@ def simulator(idx, player_queue, episode_queue, args, valid=False):
         raise Exception('Unknown type')
 
     n_params = len(list(player.parameters()))
+    if args.resize is None:
+        resize = None
+    else:
+        resize = [int(v) for v in args.resize.split(',')]
 
     while True:
         # first sync the player if possible
@@ -87,14 +91,16 @@ def simulator(idx, player_queue, episode_queue, args, valid=False):
                     player, max_len=max_len, discount_factor=discount_factor, 
                     n_frames=n_frames, 
                     deterministic=True,
-                    queue=None, interval=-1)
+                    queue=None, interval=-1,
+                    resize=resize)
             episode_queue.put(ret_)
         else:
             o_, r_, a_, ap_, ret_ = collect_one_episode(env, 
                     player, max_len=max_len, discount_factor=discount_factor, 
                     n_frames=n_frames, 
                     deterministic=numpy.random.rand() <= args.deterministic_ratio,
-                    queue=episode_queue, interval=args.collect_interval)
+                    queue=episode_queue, interval=args.collect_interval,
+                    resize=resize)
             episode_queue.put((o_, r_, a_, ap_, ret_))
 
 def main(args):
@@ -171,6 +177,11 @@ def main(args):
         # create a value estimator
         value = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
         value_old = ff.Value(n_in=128 * n_frames, n_hid=args.n_hid).to(args.device)
+
+        for m in player.parameters():
+            m.data.normal_(0., 0.01)
+        for m in value.parameters():
+            m.data.normal_(0., 0.01)
     elif args.nn == "conv":
         # create a policy
         player = conv.Player(n_frames=n_frames, n_hid=args.n_hid).to(args.device)
@@ -183,12 +194,6 @@ def main(args):
         value_old = conv.Value(n_frames, n_hid=args.n_hid).to(args.device)
     else:
         raise Exception('Unknown type')
-
-    for m in player.parameters():
-        m.data.normal_(0., 0.01)
-    for m in value.parameters():
-        m.data.normal_(0., 0.01)
-
 
     if args.cont:
         files = glob.glob("{}*th".format(args.saveto))
@@ -597,6 +602,7 @@ if __name__ == '__main__':
     parser.add_argument('-player-coeff', type=float, default=0.)
     parser.add_argument('-initial-buffer', type=int, default=0)
     parser.add_argument('-collect-interval', type=int, default=10)
+    parser.add_argument('-resize', type=str, default=None)
     parser.add_argument('saveto', type=str)
 
     args = parser.parse_args()
