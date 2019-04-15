@@ -72,9 +72,9 @@ def simulator(idx, player_queue, episode_queue, args, valid=False):
                 break
 
             for p, c in zip(player.parameters(), player_state[:n_params]):
-                p.data.copy_(torch.from_numpy(c))
+                p.data.copy_(c)
             for p, c in zip(player.buffers(), player_state[n_params:]):
-                p.data.copy_(torch.from_numpy(c))
+                p.data.copy_(c)
             if player_queue.qsize() > 0:
                 print('Simulator {} queue overflowing'.format(idx))
         except queue.Empty:
@@ -208,11 +208,10 @@ def main(args):
     player.to('cpu')
     copy_params(player, player_copy)
     for si in range(args.n_simulators):
-        #player_qs[si].put(copy.deepcopy(list(player_copy.parameters())))
-        player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
-                          [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
-    valid_q.put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
-                [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+        player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
+                          [copy.deepcopy(p.data) for p in player_copy.buffers()])
+    valid_q.put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
+                [copy.deepcopy(p.data) for p in player_copy.buffers()])
     player.to(args.device)
 
     if args.device == 'cuda':
@@ -256,20 +255,19 @@ def main(args):
 
             player.eval()
 
-            if numpy.mod((ni-pre_filled+1), val_iter) == 0:
-                ret_ = -numpy.Inf
-                while True:
-                    try:
-                        ret_ = return_q.get_nowait()
-                    except queue.Empty:
-                        break
-                if ret_ != -numpy.Inf:
-                    return_history.append(ret_)
-                    if valid_ret == -numpy.Inf:
-                        valid_ret = ret_
-                    else:
-                        valid_ret = 0.9 * valid_ret + 0.1 * ret_
-                    print('Valid run', ret_, valid_ret)
+            ret_ = -numpy.Inf
+            while True:
+                try:
+                    ret_ = return_q.get_nowait()
+                except queue.Empty:
+                    break
+            if ret_ != -numpy.Inf:
+                return_history.append(ret_)
+                if valid_ret == -numpy.Inf:
+                    valid_ret = ret_
+                else:
+                    valid_ret = 0.9 * valid_ret + 0.1 * ret_
+                print('Valid run', ret_, valid_ret)
 
             #st = time.time()
 
@@ -283,16 +281,16 @@ def main(args):
                     except queue.Empty:
                         break
                 
-                player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
-                                  [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+                player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
+                                  [copy.deepcopy(p.data) for p in player_copy.buffers()])
             while True:
                 try:
                     # empty the queue, as the new one has arrived
                     valid_q.get_nowait()
                 except queue.Empty:
                     break
-            valid_q.put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
-                        [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+            valid_q.put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
+                        [copy.deepcopy(p.data) for p in player_copy.buffers()])
 
             player.to(args.device)
 
