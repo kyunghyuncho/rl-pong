@@ -271,6 +271,8 @@ def main(args):
                         valid_ret = 0.9 * valid_ret + 0.1 * ret_
                     print('Valid run', ret_, valid_ret)
 
+            #st = time.time()
+
             player.to('cpu')
             copy_params(player, player_copy)
             for si in range(args.n_simulators):
@@ -294,17 +296,22 @@ def main(args):
 
             player.to(args.device)
 
-            n_collected = 0
+            #print('model push took', time.time()-st)
+
+            #st = time.time()
+
+            n_collected_frames_ = 0 
             while True:
                 try:
                     epi = episode_q.get_nowait()
                     replay_buffer.add(epi[0], epi[1], epi[2], epi[3])
-                    n_collected_frames = n_collected_frames + len(epi[0])
+                    n_collected_frames_ = n_collected_frames_ + len(epi[0])
                 except queue.Empty:
                     break
-                if n_collected_frames >= max_collected_frames \
+                if n_collected_frames_ >= max_collected_frames \
                         and (len(replay_buffer.buffer) + len(replay_buffer.priority_buffer)) > 0:
                     break
+            n_collected_frames = n_collected_frames + n_collected_frames_
 
             if len(replay_buffer.buffer) + len(replay_buffer.priority_buffer) < 1:
                 continue
@@ -319,10 +326,14 @@ def main(args):
                     pre_filled = ni
                     initial = False
 
+            #print('collection took', time.time()-st)
+
             #print('Buffer size', len(replay_buffer.buffer) + len(replay_buffer.priority_buffer))
 
             # fit a value function
             # TD(0)
+            #st = time.time()
+
             value.train()
             for vi in range(n_value):
                 if numpy.mod(vi, update_every) == 0:
@@ -378,8 +389,13 @@ def main(args):
                       'value_loss', value_loss, 
                       'entropy', -entropy,
                       'ess', ess)
+
+            #print('value update took', time.time()-st)
+
             
             # fit a policy
+            #st = time.time()
+
             value.eval()
             player.train()
             if args.player_coeff > 0.:
@@ -446,15 +462,22 @@ def main(args):
 
                 if args.player_coeff > 0.:
                     batch_pi_old = player_old(batch_x).clone().detach()
+
+                #print('policy computation took', time.time()-st)
                 
+                #st = time.time()
+
                 # entropy regularization
                 ent = -(batch_pi * torch.log(batch_pi+1e-8)).sum(1)
                 if entropy == -numpy.Inf:
                     entropy = ent.mean().item()
                 else:
                     entropy = 0.9 * entropy + 0.1 * ent.mean().item()
+
+                #print('entropy computation took', time.time()-st)
                 
-                
+                #st = time.time()
+
                 # advantage: r(s,a) + \gamma * V(s') - V(s)
                 adv = batch_r + discount_factor * batch_vn - batch_v
                 #adv = adv / adv.abs().max().clamp(min=1.)
@@ -462,6 +485,10 @@ def main(args):
                 loss = -(adv * logp).squeeze()
 
                 loss = loss - ent_coeff * ent
+
+                #print('basic loss computation took', time.time()-st)
+
+                #st = time.time()
 
                 # (clipped) importance weight: 
                 log_iw = logp.squeeze().clone().detach() - torch.log(batch_q+1e-8)
@@ -477,8 +504,12 @@ def main(args):
                     loss = iw * loss
                 else:
                     loss = loss
+
+                #print('importance weighting took', time.time()-st)
                 
                 if critic_aware:
+                    #st = time.time()
+
                     pred_y = value(batch_x).squeeze()
                     pred_next = value(batch_xn).squeeze()
                     critic_loss_ = -((batch_r.squeeze() + discount_factor * pred_next - pred_y) ** 2).clone().detach()
@@ -486,20 +517,31 @@ def main(args):
                     critic_loss_ = torch.exp(critic_loss_)
                     loss = loss * critic_loss_
 
+                    #print('critic aware weighting took', time.time()-st)
+
                 loss = loss.mean()
 
                 if args.player_coeff > 0.:
+                    #st = time.time()
+
                     loss_old = -(batch_pi_old * torch.log(batch_pi + 1e-8)).sum(1).mean()
                     loss = (1.-args.player_coeff) * loss + args.player_coeff * loss_old
 
+                    #print('player interpolation took', time.time()-st)
+
+                #st = time.time()
                 loss.backward()
                 if numpy.mod(pi, update_every) == (update_every-1):
                     if clip_coeff > 0.:
                         nn.utils.clip_grad_norm_(player.parameters(), clip_coeff)
                     opt_player.step()
+                #print('backward computation and update took', time.time()-st)
 
             if args.player_coeff > 0.:
                 copy_params(player, player_old)
+
+            ##print('policy update took', time.time()-st)
+
         except KeyboardInterrupt:
             print('Terminating...')
             break
