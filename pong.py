@@ -85,7 +85,12 @@ def simulator(idx, player_queue, episode_queue, args, valid=False):
             pass
 
         # run one episode
-        player.eval()
+        for m in player.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.eval()
+            if isinstance(m, nn.BatchNorm1d):
+                m.eval()
+
         if valid:
             _, _, _, _, ret_ = collect_one_episode(env, 
                     player, max_len=max_len, discount_factor=discount_factor, 
