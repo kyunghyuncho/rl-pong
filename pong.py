@@ -213,6 +213,8 @@ def main(args):
         n_collected_frames = checkpoint['n_collected_frames']
 
     copy_params(value, value_old)
+    if args.player_coeff > 0.:
+        copy_params(player, player_old)
 
     # start simulators
     player.to('cpu')
