@@ -76,9 +76,9 @@ def simulator(idx, player_queue, episode_queue, args, valid=False):
                 break
 
             for p, c in zip(player.parameters(), player_state[:n_params]):
-                p.data.copy_(c)
+                p.data.copy_(torch.from_numpy(c))
             for p, c in zip(player.buffers(), player_state[n_params:]):
-                p.data.copy_(c)
+                p.data.copy_(torch.from_numpy(c))
             if player_queue.qsize() > 0:
                 print('Simulator {} queue overflowing'.format(idx))
         except queue.Empty:
@@ -220,10 +220,10 @@ def main(args):
     player.to('cpu')
     copy_params(player, player_copy)
     for si in range(args.n_simulators):
-        player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
-                          [copy.deepcopy(p.data) for p in player_copy.buffers()])
-    valid_q.put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
-                [copy.deepcopy(p.data) for p in player_copy.buffers()])
+        player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                          [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
+    valid_q.put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
     player.to(args.device)
 
     if args.device == 'cuda':
@@ -233,13 +233,13 @@ def main(args):
     pre_filled = 0
         
     for ni in range(n_iter):
-        try:
-            # re-initialize optimizers
-            opt_player = eval(args.optimizer_player)(player.parameters(), 
-                                                     lr=args.lr, weight_decay=args.l2)
-            opt_value = eval(args.optimizer_value)(value.parameters(), 
-                                                   lr=args.lr, weight_decay=args.l2)
+        # re-initialize optimizers
+        opt_player = eval(args.optimizer_player)(player.parameters(), 
+                                                 lr=args.lr, weight_decay=args.l2)
+        opt_value = eval(args.optimizer_value)(value.parameters(), 
+                                               lr=args.lr, weight_decay=args.l2)
 
+        try:
             if not initial:
                 lr = args.lr / (1 + (ni-pre_filled+1) * args.lr_factor)
                 ent_coeff = args.ent_coeff / (1 + (ni-pre_filled+1) * args.ent_factor)
@@ -293,16 +293,16 @@ def main(args):
                     except queue.Empty:
                         break
                 
-                player_qs[si].put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
-                                  [copy.deepcopy(p.data) for p in player_copy.buffers()])
+                player_qs[si].put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                                  [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
             while True:
                 try:
                     # empty the queue, as the new one has arrived
                     valid_q.get_nowait()
                 except queue.Empty:
                     break
-            valid_q.put([copy.deepcopy(p.data) for p in player_copy.parameters()]+
-                        [copy.deepcopy(p.data) for p in player_copy.buffers()])
+            valid_q.put([copy.deepcopy(p.data.numpy()) for p in player_copy.parameters()]+
+                        [copy.deepcopy(p.data.numpy()) for p in player_copy.buffers()])
 
             player.to(args.device)
 
