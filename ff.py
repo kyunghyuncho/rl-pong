@@ -32,7 +32,7 @@ class Player(nn.Module):
         self.layers = nn.Sequential(ResLinear(n_in, n_hid, nn.ReLU()),
                                     ResLinear(n_hid, n_hid, nn.ReLU()),
                                     ResLinear(n_hid, n_hid, nn.ReLU()),
-                                    nn.Dropout(),
+                                    #nn.Dropout(),
                                     nn.Linear(n_hid, n_out))
         self.softmax = nn.Softmax(dim=1)
     
@@ -48,7 +48,7 @@ class Value(nn.Module):
         self.layers = nn.Sequential(ResLinear(n_in, n_hid, nn.ReLU()),
                                     ResLinear(n_hid, n_hid, nn.ReLU()),
                                     ResLinear(n_hid, n_hid, nn.ReLU(), bn=False),
-                                    nn.Dropout(),
+                                    #nn.Dropout(),
                                     nn.Linear(n_hid, 1))
     
     def forward(self, obs):
