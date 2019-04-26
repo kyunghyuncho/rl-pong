@@ -32,8 +32,11 @@ def normalize_obs(obs):
 # collect data
 def collect_one_episode(env, player, max_len=50, discount_factor=0.9, 
                         deterministic=False, rendering=False, verbose=False, 
-                        n_frames=1, queue=None, interval=10,
-                        resize=None):
+                        n_frames=1, queue=None, 
+                        interval=10,
+                        resize=None,
+                        reload_interval=10,
+                        reload_player=False, player_queue=None, reload_fun=None):
     episode = []
 
     observations = []
@@ -103,6 +106,24 @@ def collect_one_episode(env, player, max_len=50, discount_factor=0.9,
                 rewards = []
                 actions = []
                 action_probs = []
+
+            if numpy.mod(ml+1, reload_interval) == 0:
+                if reload_player and player_queue is not None:
+                    try:
+                        player_state = player_queue.get_nowait()
+
+                        if type(player_state) == str and player_state == "END":
+                            break
+
+                        for p, c in zip(player.parameters(), player_state[:n_params]):
+                            p.data.copy_(torch.from_numpy(c))
+                        for p, c in zip(player.buffers(), player_state[n_params:]):
+                            p.data.copy_(torch.from_numpy(c))
+                        if player_queue.qsize() > 0:
+                            print('Simulator {} queue overflowing'.format(idx))
+                    except queue.Empty:
+                        pass
+
 
     return observations, \
             rewards, \
